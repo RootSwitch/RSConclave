@@ -1,10 +1,11 @@
-# RSConclave
+# RSConclave - Multi-Model Workflows for Local LLMs
 
-RSConclave is a self-hosted web UI for local LLMs that does natively what most chat clients
-make you do by hand: send one prompt to several models and have another model consolidate the
-answers, or let two models argue a question out turn by turn. It runs as a container next to
-your inference box rather than as an app on one machine, so the same sessions, personas and
-history are there from your desktop or your phone.
+> A self-hosted web UI for local LLMs that does natively what most chat clients make you
+> do by hand: one prompt to several models with another consolidating the answers, or two
+> models arguing a question out turn by turn - no dependencies, no build step, no telemetry.
+
+RSConclave runs as a container next to your inference box rather than as an app on one
+machine, so the same sessions, personas and history are there from your desktop or your phone.
 
 Personas, presets and multi-model orchestration are all first-class, and all free.
 
@@ -22,8 +23,8 @@ real, but this belongs on a LAN or behind a VPN, not on the open internet
 negotiate a settlement. Every seat is its own model plus persona, and the gate bar under the
 transcript decides who speaks next - Step for one turn, Auto xN to let them run.*
 
-Zero dependencies: Node runs the TypeScript server directly via type stripping, the frontend
-is vanilla HTML/JS/CSS, and there is no build step.
+That is possible because Node runs the TypeScript server directly via type stripping and the
+frontend is vanilla HTML/JS/CSS - there is nothing to compile and nothing to install.
 
 ## The four modes
 
