@@ -22,7 +22,12 @@ export function renderResponses(config: CouncilConfig, entries: TranscriptEntry[
 }
 
 export function renderTemplate(template: string, prompt: string, responses: string): string {
-  return template.replaceAll('{{PROMPT}}', prompt).replaceAll('{{RESPONSES}}', responses);
+  // Function replacements: see renderStagePrompt. Model responses full of code
+  // are the NORMAL case for a consolidator, so a "$&" in any member's answer
+  // would otherwise corrupt the synthesis prompt silently.
+  return template
+    .replaceAll('{{PROMPT}}', () => prompt)
+    .replaceAll('{{RESPONSES}}', () => responses);
 }
 
 export function buildConsolidatorPrompt(

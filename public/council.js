@@ -317,7 +317,7 @@ const Council = {
     if (!config.prompt) { f.errEl.textContent = 'Prompt is empty.'; return; }
     if (!config.members.length) { f.errEl.textContent = 'Select at least one council member.'; return; }
     if (!config.consolidator.model) { f.errEl.textContent = 'Pick a consolidator.'; return; }
-    withBoxFree(() => Api.councilStart(config))
+    once('council-start', () => withBoxFree(() => Api.councilStart(config)))
       .then(async (started) => {
         if (!started) return; // declined stopping the run that was in the way
         const { sessionId } = started;
@@ -343,11 +343,24 @@ const Council = {
   buildTallyCard(session, options) {
     const counts = options.map((option) => ({ option, voters: [] }));
     const undecided = [];
+    /*
+     * One vote per seat per round, last answer wins - the same rule as
+     * tallyBallot in server/vote.ts, which is what the export uses. Counting
+     * every entry double-counted: re-runs and follow-up rounds both APPEND, so
+     * a 4-member council with one follow-up read "8 of 4 voted" with every
+     * model listed twice. Both copies had the defect, so they agreed on the
+     * wrong number, which is worse than disagreeing.
+     */
+    const latest = new Map();
+    let round = 0;
     for (const e of session.entries) {
+      if (e.kind === 'user') { round++; continue; }
       if (e.kind !== 'participant' || e.memberIndex === undefined || e.memberIndex < 0) continue;
+      if (!(e.stats?.durationMs !== undefined || e.error)) continue; // still streaming
+      latest.set(round + '|' + e.memberIndex, e);
+    }
+    for (const e of latest.values()) {
       const who = e.model || e.speaker;
-      const complete = e.stats?.durationMs !== undefined || e.error;
-      if (!complete) continue;
       const choice = e.error ? null : pickBallotOption(e.text, options);
       if (choice) counts.find((c) => c.option === choice).voters.push(who);
       else undecided.push(who);
@@ -387,6 +400,16 @@ const Council = {
     const generating = isActive && App.runState.phase === 'generating';
 
     this.cardsWrap.replaceChildren();
+    // Council was the one view that never surfaced a run failure: a preset
+    // whose endpoint was deleted went straight to 'done' with no members and no
+    // explanation. Chat, roundtable and pipeline all render this already.
+    if (App.isActiveSession() && App.runState.lastError) {
+      this.cardsWrap.append(el('div', { class: 'card' },
+        el('div', { class: 'card-header' },
+          el('span', { class: 'model-name' }, 'Run failed'),
+          el('span', { class: 'sev crit' }, 'error')),
+        el('div', { class: 'card-body error-text' }, App.runState.lastError)));
+    }
     if (cfg.ballot?.length) this.cardsWrap.append(this.buildTallyCard(session, cfg.ballot));
     let userCount = 0;
     for (const entry of session.entries) {
@@ -428,7 +451,7 @@ const Council = {
 
   buildEntryCard(session, entry, generating) {
     const isConsolidation = entry.kind === 'consolidation';
-    const complete = entry.stats?.durationMs !== undefined || entry.kind === 'error' || !!entry.error;
+    const complete = entryComplete(entry, generating && entry === session.entries.at(-1));
     const actions = [copyButton(() => entry.text), forkButton(session.id, entry.id)];
     if (!generating && entry.memberIndex !== undefined && entry.memberIndex >= 0 && !isConsolidation) {
       actions.push(el('button', { class: 'mini', onclick: () =>
@@ -458,7 +481,7 @@ const Council = {
     const ask = () => {
       const p = ta.value.trim();
       if (!p) return;
-      Api.councilFollowup(session.id, p).catch((e) => alert(e.message));
+      once('council-followup', () => Api.councilFollowup(session.id, p)).catch((e) => alert(e.message));
     };
     onEnterSend(ta, ask);
     this.followupWrap.append(el('div', { class: 'setup-band' },

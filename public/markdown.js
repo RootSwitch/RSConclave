@@ -42,15 +42,17 @@ function mdInline(text) {
     const rest = text.slice(i);
     let m;
     if ((m = rest.match(/^`([^`]+)`/))) {
+      // Inline code is passed through untouched - no LaTeX prettifying. See
+      // the note on parseMarkdown: `a \le b` must stay `a \le b`.
       out.push({ t: 'code', s: m[1] });
     } else if ((m = rest.match(/^\*\*([^*]+)\*\*/))) {
-      out.push({ t: 'bold', s: m[1] });
+      out.push({ t: 'bold', s: mdReplaceLatex(m[1]) });
     } else if ((m = rest.match(/^\*([^*\s][^*]*)\*/))) {
-      out.push({ t: 'italic', s: m[1] });
+      out.push({ t: 'italic', s: mdReplaceLatex(m[1]) });
     } else {
       const next = rest.slice(1).search(/[`*]/);
       const upto = next === -1 ? rest.length : next + 1;
-      plain(rest.slice(0, upto));
+      plain(mdReplaceLatex(rest.slice(0, upto)));
       i += upto;
       continue;
     }
@@ -60,8 +62,19 @@ function mdInline(text) {
 }
 
 // --- blocks ---
+/*
+ * LaTeX prettifying happens in mdInline, on prose segments only - NOT here on
+ * the raw text.
+ *
+ * It used to run over the whole document before fences were extracted, so
+ * "\times", "\to", "\le" and "$\rightarrow$" were rewritten to symbols inside
+ * code blocks too. Since the copy and save buttons deliver the parsed block
+ * content, users were copying altered code: `if (a \le b) return;` came out as
+ * `if (a <= b)` spelled with a real "less than or equal" glyph, which no
+ * compiler accepts. Confirmed by execution before the move.
+ */
 function parseMarkdown(raw) {
-  const lines = mdReplaceLatex(raw.replace(/\r\n/g, '\n')).split('\n');
+  const lines = raw.replace(/\r\n/g, '\n').split('\n');
   const blocks = [];
   let i = 0;
   const isTableLine = (l) => /^\s*\|.*\|\s*$/.test(l);
@@ -114,9 +127,19 @@ function parseMarkdown(raw) {
       continue;
     }
 
-    // paragraph: consecutive non-blank, non-structural lines; single
-    // newlines inside stay as breaks - models use them for layout
-    const buf = [];
+    /*
+     * Paragraph: consecutive non-blank, non-structural lines; single newlines
+     * inside stay as breaks, because models use them for layout.
+     *
+     * The first line is consumed UNCONDITIONALLY, and that is load-bearing, not
+     * tidiness. Every other block type has already been ruled out above, so the
+     * only way to arrive here on a line the loop condition rejects is a
+     * table-looking line whose successor is not a separator row - `| a | b |`
+     * with no `|---|` under it, which models emit constantly. With an empty
+     * buffer `i` never advanced: parseMarkdown spun forever and froze the tab
+     * hard enough that a watchdog timer never got to fire.
+     */
+    const buf = [lines[i++]];
     while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^\s*```/.test(lines[i]) &&
            !/^#{1,6}\s/.test(lines[i]) && !isTableLine(lines[i]) &&
            !/^\s*(?:[-*]|\d+\.)\s+/.test(lines[i]) && !/^\s*(---+|\*\*\*+)\s*$/.test(lines[i])) {

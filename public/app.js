@@ -39,6 +39,24 @@ function renderEntryText(container, text) {
   mdRender(container, body);
 }
 
+/**
+ * Is this entry finished?
+ *
+ * NOT "does it have stats": only a model turn ever gets stats, so human turns,
+ * narrator injections and every entry of an imported session (import strips
+ * stats) looked like they were still streaming - forever. That cost them their
+ * copy and fork buttons, left a live "streaming" pill on a paused session, and
+ * kept their text rendering as plain text instead of markdown.
+ *
+ * An entry is in flight only while it is the one the engine is currently
+ * writing, so anything that is not the live speaker is done by definition.
+ */
+function entryComplete(entry, isStreamingNow = false) {
+  if (entry.kind === 'error' || entry.error) return true;
+  if (entry.stats?.durationMs !== undefined) return true;
+  return !isStreamingNow;
+}
+
 function statsLine(stats) {
   if (!stats || stats.durationMs === undefined) return '';
   const secs = stats.durationMs / 1000;
@@ -377,6 +395,27 @@ function forkButton(sessionId, entryId) {
  * another view. The confirm is deliberate rather than automatic: stopping is
  * destructive to whatever is mid-flight, so it stays a decision.
  */
+/*
+ * Run an async click handler at most once at a time.
+ *
+ * The server-side race that let a double Enter start two generations is fixed,
+ * but the client should not be sending the second request at all: without this,
+ * a double-click on Send / Step / Reroll / Speak / inject either duplicated an
+ * entry or produced a "a generation is already running" alert for something the
+ * user only meant to do once. Keyed per call site, so two different buttons do
+ * not block each other.
+ */
+const inFlight = new Set();
+async function once(key, action) {
+  if (inFlight.has(key)) return undefined;
+  inFlight.add(key);
+  try {
+    return await action();
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
 async function withBoxFree(action) {
   try {
     return await action();
@@ -774,7 +813,23 @@ function connectSse() {
     }
   });
 
-  es.addEventListener('error-event', () => {});
+  /*
+   * The server's error channel. It is named 'error-event' rather than 'error'
+   * because EventSource already defines an 'error' event for transport
+   * failures - a server-sent event of that name is ambiguous with it. This
+   * listener existed as an empty stub against a name the server never emitted,
+   * so every recoverable failure the engine reported was dropped on the floor;
+   * errors only appeared where a view happened to render state.lastError, and
+   * council did not.
+   */
+  es.addEventListener('error-event', (ev) => {
+    let message = 'the run failed';
+    try { message = JSON.parse(ev.data).message || message; } catch {}
+    App.runState.lastError = message;
+    currentViewUpdate();
+    currentViewRenderContent();
+    renderStatus();
+  });
   es.onerror = () => {
     /* EventSource auto-reconnects; snapshot will resync us */
   };

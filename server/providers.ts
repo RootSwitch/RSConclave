@@ -227,7 +227,14 @@ async function streamOllama(args: StreamChatArgs): Promise<StreamResult> {
     }
   } catch (err: any) {
     if (args.signal.aborted) aborted = true;
-    else throw err;
+    else {
+      // Carry the partial text out with the error. Throwing bare discarded
+      // everything already streamed, so an idle timeout or a mid-stream
+      // {"error":...} replaced the text the user was watching with an empty
+      // error bubble. A user-initiated Stop kept its partial; a failure did not.
+      norm.finish();
+      throw Object.assign(err, { partialText: text });
+    }
   }
   norm.finish();
   if (args.signal.aborted) aborted = true;
@@ -277,7 +284,10 @@ async function streamOpenAi(args: StreamChatArgs): Promise<StreamResult> {
     }
   } catch (err: any) {
     if (args.signal.aborted) aborted = true;
-    else throw err;
+    else {
+      norm.finish();
+      throw Object.assign(err, { partialText: text }); // see streamOllama
+    }
   }
   norm.finish();
   if (args.signal.aborted) aborted = true;

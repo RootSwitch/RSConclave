@@ -38,11 +38,13 @@ test('vote: tolerates markdown and trailing punctuation around the answer', () =
 });
 
 test('vote: tally counts voters per option and records who', () => {
+  // Distinct memberIndex per seat, as a real council has: one vote per seat per
+  // round, so seats sharing an index would (correctly) collapse to one.
   const r = tallyBallot(['Yes', 'No'], [
     { ...member('a', 'Yes'), kind: 'user', memberIndex: undefined } as TranscriptEntry, // ignored
-    member('gpt', 'after thought, Yes'),
-    member('gemma', 'No'),
-    member('mistral', 'Yes'),
+    { ...member('gpt', 'after thought, Yes'), memberIndex: 0 },
+    { ...member('gemma', 'No'), memberIndex: 1 },
+    { ...member('mistral', 'Yes'), memberIndex: 2 },
   ]);
   assert.equal(r.votesCast, 3);
   assert.deepEqual(r.tallies.find((t) => t.option === 'Yes')?.voters, ['gpt', 'mistral']);
@@ -52,9 +54,9 @@ test('vote: tally counts voters per option and records who', () => {
 
 test('vote: errored and unmatched members are undecided, not silently dropped', () => {
   const r = tallyBallot(['Yes', 'No'], [
-    member('gpt', 'Yes'),
-    member('broken', '', { error: 'unreachable' }),
-    member('rambler', 'I would rather not commit to either position'),
+    { ...member('gpt', 'Yes'), memberIndex: 0 },
+    { ...member('broken', '', { error: 'unreachable' }), memberIndex: 1 },
+    { ...member('rambler', 'I would rather not commit to either position'), memberIndex: 2 },
   ]);
   assert.equal(r.votesCast, 1);
   assert.deepEqual(r.undecided, ['broken', 'rambler']);
@@ -67,6 +69,44 @@ test('vote: the consolidation entry is not a vote', () => {
   ]);
   assert.equal(r.votesCast, 1);
   assert.equal(r.tallies.find((t) => t.option === 'No')?.count, 0);
+});
+
+test('vote: a re-run supersedes the answer it replaces', () => {
+  // rerunMember APPENDS, so counting every entry double-counted one member.
+  const r = tallyBallot(['Yes', 'No'], [
+    { ...member('m0', 'No'), memberIndex: 0 },
+    { ...member('m0', 'Yes'), memberIndex: 0 },
+  ]);
+  assert.equal(r.votesCast, 1);
+  assert.equal(r.tallies.find((t) => t.option === 'Yes')?.count, 1);
+  assert.equal(r.tallies.find((t) => t.option === 'No')?.count, 0);
+});
+
+test('vote: an errored member re-run successfully is not also undecided', () => {
+  const r = tallyBallot(['Yes', 'No'], [
+    { ...member('m0', '', { error: 'unreachable' }), memberIndex: 0 },
+    { ...member('m0', 'Yes'), memberIndex: 0 },
+  ]);
+  assert.equal(r.votesCast, 1);
+  assert.deepEqual(r.undecided, []);
+});
+
+test('vote: a follow-up round is counted separately, not added on top', () => {
+  const user = (text: string) =>
+    ({ id: 'u' + text, ts: '', kind: 'user' as const, speaker: 'User', text });
+  // two members, one original round and one follow-up round
+  const r = tallyBallot(['Yes', 'No'], [
+    user('first question'),
+    { ...member('m0', 'Yes'), memberIndex: 0 },
+    { ...member('m1', 'No'), memberIndex: 1 },
+    user('follow-up'),
+    { ...member('m0', 'Yes'), memberIndex: 0 },
+    { ...member('m1', 'Yes'), memberIndex: 1 },
+  ]);
+  // 2 members x 2 rounds = 4 answers, not 4 counted as 8 nor collapsed to 2
+  assert.equal(r.votesCast, 4);
+  assert.equal(r.tallies.find((t) => t.option === 'Yes')?.count, 3);
+  assert.equal(r.tallies.find((t) => t.option === 'No')?.count, 1);
 });
 
 test('vote: instruction lists every option', () => {

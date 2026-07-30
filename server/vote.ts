@@ -71,10 +71,31 @@ export function tallyBallot(options: string[], entries: TranscriptEntry[]): Ball
   const undecided: string[] = [];
   let votesCast = 0;
 
+  /*
+   * One vote per member per round - last answer wins.
+   *
+   * Both re-runs and follow-up rounds APPEND entries rather than replacing
+   * them, so counting every participant entry double-counted: a 4-member
+   * council with one follow-up reported "8 of 4 voted" with every model listed
+   * twice, and a member that errored and was then re-run appeared in both
+   * `undecided` and a tally. Rounds are delimited by the user entries that
+   * start them, which is the same "last one wins" rule buildMemberHistory
+   * already applies when assembling each member's history.
+   */
+  const latest = new Map<string, TranscriptEntry>();
+  let round = 0;
   for (const e of entries) {
-    // Council members only: skip the prompt, the consolidation and the errors.
+    if (e.kind === 'user') {
+      round++;
+      continue;
+    }
+    // Council members only: skip the consolidation and anything not a member.
     if (e.kind !== 'participant') continue;
     if (e.memberIndex === undefined || e.memberIndex < 0) continue;
+    latest.set(`${round}|${e.memberIndex}`, e);
+  }
+
+  for (const e of latest.values()) {
     const who = e.model || e.speaker;
     if (e.error) {
       undecided.push(who);

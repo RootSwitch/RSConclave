@@ -6,6 +6,24 @@ import { createRequire } from 'node:module';
 const require2 = createRequire(import.meta.url);
 const { parseMarkdown, mdInline, mdReplaceLatex, mdFileName } = require2('../../public/markdown.js');
 
+/*
+ * Regression: a table-looking line with no separator row under it used to spin
+ * parseMarkdown forever, freezing the tab. Models emit bare pipe rows
+ * constantly, so this was the most likely field crash in the app. The timeout
+ * is the assertion - a hang here fails the suite rather than wedging it.
+ */
+test('markdown: a bare pipe row does not hang the parser', { timeout: 3000 }, () => {
+  const kinds = (src: string) => parseMarkdown(src).map((b: { t: string }) => b.t);
+  assert.deepEqual(kinds('| a | b |'), ['p']);
+  assert.deepEqual(kinds('| a | b |\n| c | d |'), ['p', 'p']);
+  assert.deepEqual(kinds('|'), ['p']);
+  assert.deepEqual(kinds('text\n| a | b |'), ['p', 'p']);
+  // a well-formed table must still be a table
+  const ok = parseMarkdown('| a | b |\n|---|---|\n| 1 | 2 |');
+  assert.equal(ok.length, 1);
+  assert.equal(ok[0].t, 'table');
+});
+
 test('markdown: headings, paragraphs and rules', () => {
   const b = parseMarkdown('### Summary\n\nSome text.\n\n---');
   assert.equal(b[0].t, 'h');

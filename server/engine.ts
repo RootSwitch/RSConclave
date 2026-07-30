@@ -149,10 +149,17 @@ function persistOf(a: Active): void {
   // in-memory copy would silently revert it.
   if (active !== a) {
     const disk = store.loadSession<Session>(a.owner, a.session.id);
-    if (disk) {
-      a.session.title = disk.title;
-      a.session.tags = disk.tags;
+    if (!disk) {
+      /*
+       * The file is gone: this run was stopped and then the session deleted
+       * before the aborted stream finished tearing down. Writing here recreated
+       * the file and the session came back in the sidebar on the next refresh.
+       * A run whose session no longer exists has nothing to save.
+       */
+      return;
     }
+    a.session.title = disk.title;
+    a.session.tags = disk.tags;
   }
   a.session.updatedAt = new Date().toISOString();
   store.saveSession(a.owner, a.session);
@@ -194,7 +201,7 @@ function launch(work: () => Promise<void>): void {
     a.waitingFirstToken = false;
     a.phase = a.session.mode === 'roundtable' ? 'awaiting_gate' : 'done';
     persistOf(a);
-    broadcast('error', { message, recoverable: true }, a.owner);
+    broadcast('error-event', { message, recoverable: true }, a.owner);
     if (active === a) pushState();
   });
 }
@@ -253,6 +260,30 @@ async function runTurn(a: Active, opts: {
   const params = { ...opts.member.params };
   if (opts.keepAlive !== undefined) params.keep_alive = opts.keepAlive;
 
+  /*
+   * Claim the box BEFORE the first await, and this ordering is the whole ball
+   * game.
+   *
+   * Every concurrency guard in this file keys off phase === 'generating'
+   * (assertIdle, chatSend, step, chatRegenerate, chatContinue, humanTurn...).
+   * This block used to sit AFTER `await getModelInfo`, which is a network POST
+   * with a 10s timeout on a model's first use - so for the whole of that window
+   * every guard passed and the run had no AbortController. Confirmed against a
+   * stub with a slow /api/show: pressing Enter twice in chat produced two user
+   * entries, two concurrent /api/chat streams, and two replies, with the second
+   * run's controller overwriting the first so Cancel only stopped one of them.
+   *
+   * Everything from the caller's guard down to here is one synchronous tick, so
+   * setting the phase now means the second request - which is a separate tick -
+   * is correctly rejected.
+   */
+  a.abort = new AbortController();
+  a.phase = 'generating';
+  a.currentSpeaker = opts.entrySeed.speaker;
+  a.waitingFirstToken = true;
+  a.lastError = undefined;
+  pushState();
+
   // Measure the prompt against the model's real window (explicit num_ctx beats
   // the Modelfile's, which beats Ollama's server default).
   const info = await getModelInfo(ep, opts.member.model);
@@ -260,13 +291,22 @@ async function runTurn(a: Active, opts: {
   a.contextTokens = estimateMessages(opts.messages);
   a.contextWindow = window;
   a.contextPct = Math.round((a.contextTokens / window) * 100);
+  pushState(); // the context meter can only be filled in once the window is known
 
-  a.abort = new AbortController();
-  a.phase = 'generating';
-  a.currentSpeaker = opts.entrySeed.speaker;
-  a.waitingFirstToken = true;
-  a.lastError = undefined;
-  pushState();
+  /*
+   * Cancel pressed while /api/show was still in flight. The controller now
+   * exists that early, so the abort actually landed somewhere - honour it
+   * instead of going on to start a generation nobody is waiting for.
+   */
+  if (a.abort.signal.aborted) {
+    const stopped = opts.appendTo ?? addEntry({ ...opts.entrySeed, text: '' }, a);
+    stopped.error = 'cancelled';
+    a.abort = null;
+    a.waitingFirstToken = false;
+    persistOf(a);
+    broadcast('entry', stopped, a.owner);
+    return stopped;
+  }
 
   const entry = opts.appendTo ?? addEntry({ ...opts.entrySeed, text: '' }, a);
   const baseText = opts.appendTo ? opts.appendTo.text : '';
@@ -294,9 +334,14 @@ async function runTurn(a: Active, opts: {
       entry.error = 'cancelled';
     } else {
       entry.kind = 'error';
+      // Keep whatever streamed before the failure (providers attach it), so the
+      // final entry event does not blank out text the user already read.
+      if (typeof err?.partialText === 'string' && err.partialText) {
+        entry.text = baseText + err.partialText;
+      }
       entry.error = err?.message ?? String(err);
       a.lastError = entry.error;
-      broadcast('error', { message: entry.error, recoverable: true }, a.owner);
+      broadcast('error-event', { message: entry.error, recoverable: true }, a.owner);
     }
   } finally {
     a.abort = null;
@@ -411,7 +456,14 @@ async function runConsolidation(a: Active, template?: string): Promise<void> {
 function finishRun(a: Active): void {
   if (active !== a) return;
   a.phase = 'done';
-  a.session.status = 'done';
+  /*
+   * A cancelled run is 'stopped', not 'done'. finishRun sits outside the
+   * pause check in runCouncil/runPipeline, so a council the user explicitly
+   * cancelled was stamped 'done' and became indistinguishable in the sidebar
+   * from one that ran to completion. Chat and roundtable already got this
+   * right, via stopRun.
+   */
+  a.session.status = a.pauseRequested ? 'stopped' : 'done';
   persistOf(a);
   pushState();
 }
@@ -607,7 +659,8 @@ export function consolidateRoundtable(
   const transcript = renderTranscriptText(a.session.entries);
   if (!transcript) throw new Error('nothing to consolidate yet');
   const prompt = template.includes('{{TRANSCRIPT}}')
-    ? template.replaceAll('{{TRANSCRIPT}}', transcript)
+    // Function replacement - a transcript is the most $-laden text in the app.
+    ? template.replaceAll('{{TRANSCRIPT}}', () => transcript)
     : `${template.trim()}\n\nTRANSCRIPT:\n${transcript}`;
   launch(async () => {
     await runTurn(a, {
@@ -842,6 +895,13 @@ export function forkSession(username: string, sessionId: string, entryId: string
   copy.createdAt = new Date().toISOString();
   copy.updatedAt = copy.createdAt;
   copy.entries = copy.entries.slice(0, cut + 1);
+  /*
+   * Fresh entry ids. structuredClone copies them verbatim, and the SSE
+   * remove-entry handler filters the open session's entries by id alone - so
+   * rerolling in the fork removed the shared entries from the ORIGINAL
+   * session's view in another tab.
+   */
+  copy.entries = copy.entries.map((e) => ({ ...e, id: store.newId() }));
   copy.status = 'paused';
   copy.forkedFrom = { sessionId: source.id, entryId, title: source.title };
   store.saveSession(username, copy);

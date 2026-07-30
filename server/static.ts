@@ -19,7 +19,20 @@ const MIME: Record<string, string> = {
 
 export function serveStatic(req: IncomingMessage, res: ServerResponse): void {
   const url = new URL(req.url ?? '/', 'http://localhost');
-  let rel = decodeURIComponent(url.pathname);
+  /*
+   * decodeURIComponent throws URIError on a malformed escape ("/%", "/%zz").
+   * This handler is async, so an unguarded throw became an unhandled rejection:
+   * no response was ever written and the socket was held until Node's 300s
+   * requestTimeout. Unauthenticated, and each hit costs a connection slot -
+   * confirmed by request, which simply never returned.
+   */
+  let rel: string;
+  try {
+    rel = decodeURIComponent(url.pathname);
+  } catch {
+    res.writeHead(400).end('bad request path');
+    return;
+  }
   if (rel === '/') rel = '/index.html';
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
   // Compare against PUBLIC_DIR + separator, not the bare prefix: a plain

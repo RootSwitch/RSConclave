@@ -146,6 +146,10 @@ const Chat = {
   },
 
   async start() {
+    return once('chat-start', () => this._start());
+  },
+
+  async _start() {
     const s = this.setup;
     s.errEl.textContent = '';
     if (!s.model.value) { s.errEl.textContent = 'Pick a model.'; return; }
@@ -179,11 +183,14 @@ const Chat = {
     if (!session || session.mode !== 'chat') return;
     const sc = this.scrollEl;
     const nearBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 120;
+    // Only the entry the engine is writing right now is in flight; see
+    // entryComplete in app.js for why "has stats" was the wrong test.
+    const generating = App.isActiveSession() && App.runState.phase === 'generating';
 
     this.transcriptEl.replaceChildren(
       ...session.entries.map((e) => {
         const mine = e.kind === 'user';
-        const complete = e.stats?.durationMs !== undefined || e.kind === 'error' || !!e.error;
+        const complete = entryComplete(e, generating && e === session.entries.at(-1));
         const textEl = el('div', { class: 'text', dataset: { entryBody: e.id } });
         if (complete && e.text) renderEntryText(textEl, e.text);
         else textEl.textContent = e.text;
@@ -244,7 +251,7 @@ const Chat = {
       if (!text) return;
       box.value = '';
       try {
-        await Api.chatSend(text);
+        await once('chat-send', () => Api.chatSend(text));
       } catch (err) { alert(err.message); }
     };
     onEnterSend(box, send);
@@ -254,7 +261,7 @@ const Chat = {
       el('div', { class: 'row' }, box),
       el('div', { class: 'row' },
         el('button', { class: 'primary', onclick: send }, 'Send ▸'),
-        hasReply ? el('button', { onclick: () => Api.chatRegenerate().catch((e) => alert(e.message)) }, 'Regenerate') : null,
+        hasReply ? el('button', { onclick: () => once('chat-regen', () => Api.chatRegenerate()).catch((e) => alert(e.message)) }, 'Regenerate') : null,
         el('span', { class: 'grow' }),
         el('button', { class: 'danger', onclick: () => {
           if (confirm('End this chat?')) Api.stopRun().catch((e) => alert(e.message));

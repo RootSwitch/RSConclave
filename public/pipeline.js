@@ -165,7 +165,7 @@ const Pipeline = {
     const stages = this.collectStages();
     if (!input) { this.errEl.textContent = 'Input is empty.'; return; }
     if (!stages.length) { this.errEl.textContent = 'Add at least one stage with a template.'; return; }
-    withBoxFree(() => Api.pipelineStart({ input, stages }))
+    once('pipeline-start', () => withBoxFree(() => Api.pipelineStart({ input, stages })))
       .then(async (started) => {
         if (!started) return; // declined stopping the run that was in the way
         App.session = await Api.getSession(started.sessionId);
@@ -215,7 +215,7 @@ const Pipeline = {
   },
 
   buildStageCard(session, entry, generating) {
-    const complete = entry.stats?.durationMs !== undefined || entry.kind === 'error' || !!entry.error;
+    const complete = entryComplete(entry, generating && entry === session.entries.at(-1));
     const stageNo = (entry.memberIndex ?? 0) + 1;
     const actions = [copyButton(() => entry.text)];
     if (!generating && entry.memberIndex !== undefined) {

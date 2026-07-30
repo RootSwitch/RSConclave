@@ -20,7 +20,12 @@ export function resolveStageInput(entries: TranscriptEntry[], stageIndex: number
 
 export function renderStagePrompt(template: string, input: string): string {
   return template.includes('{{INPUT}}')
-    ? template.replaceAll('{{INPUT}}', input)
+    // Function replacement, not a string: a string replacement makes
+    // replaceAll interpret $$, $&, $` and $' inside the INPUT. A stage output
+    // containing "$&" silently became the literal "{{INPUT}}", and "$`"
+    // spliced in the whole preceding template. Exactly the code-heavy content
+    // a critique-then-rewrite pipeline exists to handle.
+    ? template.replaceAll('{{INPUT}}', () => input)
     : `${template.trim()}\n\n${input}`; // forgiving: append input if placeholder forgotten
 }
 

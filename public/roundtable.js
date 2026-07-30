@@ -360,7 +360,7 @@ const Roundtable = {
     this.errEl.textContent = '';
     const config = this.collectConfig();
     if (config.participants.length < 2) { this.errEl.textContent = 'Need at least 2 participants - pick a model for each, names are optional.'; return; }
-    withBoxFree(() => Api.rtStart(config))
+    once('rt-start', () => withBoxFree(() => Api.rtStart(config)))
       .then((started) => (started ? openSession(started.sessionId) : undefined))
       .catch((err) => { this.errEl.textContent = err.message; });
   },
@@ -374,13 +374,14 @@ const Roundtable = {
     const participants = session.config.participants ?? [];
     const sc = this.scrollEl;
     const nearBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 120;
+    const generating = App.isActiveSession() && App.runState.phase === 'generating';
 
     this.transcriptEl.replaceChildren(
       ...session.entries.map((e) => {
         const p = participants.find((x) => x.id === e.participantId);
         const neutral = e.kind === 'narrator' || e.kind === 'user';
         const consolidation = e.kind === 'consolidation';
-        const complete = e.stats?.durationMs !== undefined || e.kind === 'error' || !!e.error;
+        const complete = entryComplete(e, generating && e === session.entries.at(-1));
         const cls = `bubble${neutral ? ' neutral' : ''}${e.kind === 'error' ? ' error' : ''}${consolidation ? ' consolidation' : ''}`;
 
         const textEl = el('div', { class: 'text', dataset: { entryBody: e.id } });
@@ -461,7 +462,7 @@ const Roundtable = {
       const text = injectText.value.trim();
       if (!text) return;
       try {
-        await Api.rtInject(text, as);
+        await once('rt-inject', () => Api.rtInject(text, as));
         injectText.value = '';
       } catch (err) { alert(err.message); }
     };
@@ -476,7 +477,7 @@ const Roundtable = {
         const text = speakText.value.trim();
         if (!text) return;
         try {
-          await Api.rtHumanTurn(chosen.id, text);
+          await once('rt-human', () => Api.rtHumanTurn(chosen.id, text));
           this.gateNextOverride = null;
         } catch (err) { alert(err.message); }
       };
@@ -486,13 +487,13 @@ const Roundtable = {
       turnControls.push(
         el('button', { class: 'primary', onclick: () => {
           this.gateNextOverride = null;
-          Api.rtStep(nextSel.value, 0).catch((e) => alert(e.message));
+          once('rt-step', () => Api.rtStep(nextSel.value, 0)).catch((e) => alert(e.message));
         } }, 'Step ▸'),
         el('label', {}, 'Auto ×'),
         autoN,
         el('button', { onclick: () => {
           this.gateNextOverride = null;
-          Api.rtStep(nextSel.value, parseInt(autoN.value, 10) || 1).catch((e) => alert(e.message));
+          once('rt-step', () => Api.rtStep(nextSel.value, parseInt(autoN.value, 10) || 1)).catch((e) => alert(e.message));
         } }, 'Go ▶▶'),
       );
     }
@@ -502,7 +503,7 @@ const Roundtable = {
         el('label', {}, 'Next:'),
         nextSel,
         ...turnControls,
-        el('button', { onclick: () => Api.rtReroll().catch((e) => alert(e.message)) }, 'Reroll last'),
+        el('button', { onclick: () => once('rt-reroll', () => Api.rtReroll()).catch((e) => alert(e.message)) }, 'Reroll last'),
         el('span', { class: 'grow' }),
         el('button', { class: 'danger', onclick: () => {
           if (confirm('End this roundtable?')) Api.rtStop().catch((e) => alert(e.message));

@@ -80,13 +80,34 @@ export async function dispatch(req: IncomingMessage, res: ServerResponse): Promi
     if (r.method !== req.method || r.segments.length !== segs.length) continue;
     const params: Record<string, string> = {};
     let ok = true;
+    let badEscape = false;
     for (let i = 0; i < segs.length; i++) {
       const pat = r.segments[i];
-      if (pat.startsWith(':')) params[pat.slice(1)] = decodeURIComponent(segs[i]);
-      else if (pat !== segs[i]) {
+      if (pat.startsWith(':')) {
+        /*
+         * decodeURIComponent throws URIError on a malformed escape, and this
+         * runs OUTSIDE the try/catch that wraps the handler below - so
+         * "/api/sessions/%zz" threw straight past dispatch, became an unhandled
+         * rejection, and the request hung with no response ever written.
+         *
+         * The answer is written here rather than thrown, because a throw from
+         * this position escapes dispatch just as the URIError did and reproduces
+         * the same hang. (First version of this fix did exactly that.)
+         */
+        try {
+          params[pat.slice(1)] = decodeURIComponent(segs[i]);
+        } catch {
+          badEscape = true;
+          break;
+        }
+      } else if (pat !== segs[i]) {
         ok = false;
         break;
       }
+    }
+    if (badEscape) {
+      sendJson(res, 400, { error: 'malformed percent-encoding in the URL' });
+      return true;
     }
     if (!ok) continue;
     try {
