@@ -89,6 +89,25 @@ case "$args" in
   *) exit 0 ;;
 esac
 EOF
+# rocminfo / rocm-smi are OPTIONAL for the script, so both stubs can be made to
+# vanish (STUB_NO_ROCMINFO / STUB_NO_ROCMSMI) to prove the absent path too.
+cat > "$BIN/rocminfo" <<'EOF'
+#!/bin/sh
+[ -n "${STUB_NO_ROCMINFO:-}" ] && exit 127
+echo "  Name:                    gfx000"
+echo "  Marketing Name:          Stub CPU Agent"
+echo "  Name:                    ${STUB_GFX:-gfx1100}"
+echo "  Marketing Name:          Stub AMD GPU"
+EOF
+cat > "$BIN/rocm-smi" <<'EOF'
+#!/bin/sh
+[ -n "${STUB_NO_ROCMSMI:-}" ] && exit 127
+case "$*" in
+  *showmeminfo*) echo "GPU[0]  : VRAM Total Memory (B): ${STUB_VRAM_B:-25757220864}" ;;
+  *) : ;;
+esac
+exit 0
+EOF
 chmod +x "$BIN"/*
 export PATH="$BIN:$PATH"
 export STUB_LOG="$LOG"
@@ -126,6 +145,59 @@ touch "$ROOT/dev/kfd"
 rc=$(STUB_PCI=amd run --hsa-override 11.0.0)
 check "proceeds with kfd" "$([ "$rc" = 0 ]; echo $?)"
 check "HSA override in drop-in" "$(grep -q 'HSA_OVERRIDE_GFX_VERSION=11.0.0' "$DROPIN"; echo $?)"
+
+echo "=== D2: AMD gfx target detection drives the override advice ==="
+# 7900 XTX territory: officially supported, so the script should NOT push an
+# override at someone whose card does not need one.
+rc=$(STUB_PCI=amd STUB_GFX=gfx1100 run)
+check "rdna3 proceeds without override" "$([ "$rc" = 0 ]; echo $?)"
+check "rdna3 gfx reported" "$(grep -q 'ROCm gfx target(s): gfx1100' "$LOG/out.txt"; echo $?)"
+check "rdna3 named" "$(grep -q 'that is RDNA3' "$LOG/out.txt"; echo $?)"
+check "rdna3 not told it needs one" "$(grep -q 'officially supported' "$LOG/out.txt"; echo $?)"
+
+# 9060 XT territory: new enough that the answer is honestly "depends on your
+# Ollama", and the advice must say so rather than promise a value works.
+rc=$(STUB_PCI=amd STUB_GFX=gfx1201 run)
+check "rdna4 proceeds" "$([ "$rc" = 0 ]; echo $?)"
+check "rdna4 named" "$(grep -q 'that is RDNA4' "$LOG/out.txt"; echo $?)"
+check "rdna4 advice hedged, not promised" "$(grep -q 'depends on the ROCm build' "$LOG/out.txt"; echo $?)"
+check "rdna4 gives both fallbacks" "$(grep -q '12.0.0, and if that fails, 11.0.0' "$LOG/out.txt"; echo $?)"
+
+rc=$(STUB_PCI=amd STUB_GFX=gfx1030 run)
+check "rdna2 named" "$(grep -q 'that is RDNA2' "$LOG/out.txt"; echo $?)"
+check "rdna2 told to override" "$(grep -q 'hsa-override 10.3.0' "$LOG/out.txt"; echo $?)"
+
+# rocminfo missing must degrade to the generic list, not crash or go silent.
+rc=$(STUB_PCI=amd STUB_NO_ROCMINFO=1 run)
+check "no rocminfo still proceeds" "$([ "$rc" = 0 ]; echo $?)"
+check "no rocminfo says so" "$(grep -q 'gfx target unknown' "$LOG/out.txt"; echo $?)"
+check "no rocminfo lists all families" "$(grep -q 'RDNA4: 12.0.0, RDNA3: 11.0.0, RDNA2: 10.3.0' "$LOG/out.txt"; echo $?)"
+
+# An explicit override must win over any suggestion machinery.
+rc=$(STUB_PCI=amd STUB_GFX=gfx1201 run --hsa-override 12.0.0)
+check "explicit override acknowledged" "$(grep -q 'HSA_OVERRIDE_GFX_VERSION=12.0.0 will be set' "$LOG/out.txt"; echo $?)"
+check "explicit override suppresses advice" "$([ "$(grep -c 'depends on the ROCm build' "$LOG/out.txt")" = 0 ]; echo $?)"
+
+echo "=== D3: VRAM reporting picks the right model class ==="
+# 24 GB (7900 XTX)
+rc=$(STUB_PCI=amd STUB_GFX=gfx1100 STUB_VRAM_B=25757220864 run)
+check "24GB reported" "$(grep -qE 'GPU memory: about 2[34] GB' "$LOG/out.txt"; echo $?)"
+check "24GB suggests 27B-32B" "$(grep -q '27B-32B' "$LOG/out.txt"; echo $?)"
+check "suggests a tiny model first" "$(grep -q 'pull llama3.2:3b' "$LOG/out.txt"; echo $?)"
+
+# 16 GB (9060 XT)
+rc=$(STUB_PCI=amd STUB_GFX=gfx1201 STUB_VRAM_B=17179869184 run)
+check "16GB reported" "$(grep -qE 'GPU memory: about 1[56] GB' "$LOG/out.txt"; echo $?)"
+check "16GB suggests 14B not 32B" "$(grep -q 'comfortable here: 14B' "$LOG/out.txt"; echo $?)"
+
+# An implausible reading must be discarded rather than reported confidently.
+rc=$(STUB_PCI=amd STUB_GFX=gfx1100 STUB_VRAM_B=12 run)
+check "nonsense VRAM refused" "$(grep -q 'could not read GPU memory' "$LOG/out.txt"; echo $?)"
+check "nonsense VRAM does not print a size" "$([ "$(grep -c 'GPU memory: about' "$LOG/out.txt")" = 0 ]; echo $?)"
+
+# --pull given: the tiny-model hint would be noise, so it must not appear.
+rc=$(STUB_PCI=amd STUB_GFX=gfx1100 run --pull stub:7b)
+check "no tiny-model hint when --pull given" "$([ "$(grep -c 'pull llama3.2:3b' "$LOG/out.txt")" = 0 ]; echo $?)"
 
 echo "=== E: option validation ==="
 rc=$(run --tune)

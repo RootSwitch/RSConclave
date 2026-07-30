@@ -32,6 +32,24 @@
 #                         at install time.
 #   --update              re-run the official installer even if ollama exists
 #
+# Worked examples.
+#
+#   First run on any box - prove the whole path with a model that pulls in a
+#   minute, before spending twenty on one that might not fit:
+#     ./tools/install-ollama.sh --pull llama3.2:3b --allow-from 192.168.1.0/24
+#
+#   AMD, RX 7900 XTX (gfx1100, 24 GB). Officially ROCm-supported, so no
+#   override; 24 GB comfortably holds a 32B at Q4:
+#     ./tools/install-ollama.sh --gpu amd --pull llama3.2:3b
+#     ./tools/install-ollama.sh --pull qwen2.5:32b --tune
+#
+#   AMD, RX 9060 XT (gfx1201, 16 GB). RDNA4, so the override may be needed -
+#   run it without one FIRST and let the script tell you, rather than setting a
+#   value pre-emptively that could break a card which was working:
+#     ./tools/install-ollama.sh --gpu amd --pull llama3.2:3b
+#     # only if that reports "no compatible GPUs":
+#     ./tools/install-ollama.sh --gpu amd --hsa-override 12.0.0 --pull llama3.2:3b
+#
 # Driver installation is deliberately NOT attempted. A driver install wants a
 # reboot in the middle, which is a terrible thing for a script to spring on
 # someone - docs/inference-host.md walks through it for NVIDIA and AMD. This
@@ -119,15 +137,121 @@ case "$GPU" in
       amdgpu-install path), reboot, then run this again. Or pass --gpu cpu."
         fi
         say "/dev/kfd exists - amdgpu compute is ready"
-        if [ -z "$HSA_OVERRIDE" ]; then
-            warn "many consumer AMD cards need --hsa-override (RDNA3: 11.0.0, RDNA2: 10.3.0)."
-            warn "If Ollama later reports 'no compatible GPUs', that is the first thing to try."
+        # Which card, in ROCm's own terms.
+        #
+        # HSA_OVERRIDE_GFX_VERSION exists to lie to ROCm about the gfx target,
+        # so knowing the real target turns the override question from guesswork
+        # into a lookup. rocminfo is optional - Ollama ships its own ROCm
+        # userspace and does not need it - but when present it is the difference
+        # between "try these three values" and "try this one".
+        GFX=""
+        if command -v rocminfo >/dev/null 2>&1; then
+            # `|| true` is load-bearing. This runs under `set -euo pipefail`, and
+            # grep exits 1 when it matches nothing - so on any box where rocminfo
+            # is present but says nothing useful (or is a stub, or lists only CPU
+            # agents) the bare assignment ENDED THE SCRIPT, silently, one line
+            # after announcing the driver was ready.
+            GFX=$(rocminfo 2>/dev/null | grep -oE 'gfx[0-9a-f]+' \
+                  | grep -vx 'gfx000' | sort -u | tr '\n' ' ' | sed 's/ *$//' || true)
+        fi
+        if [ -n "$GFX" ]; then
+            say "ROCm gfx target(s): $GFX"
+        else
+            warn "gfx target unknown (rocminfo is not installed - 'apt install rocminfo' to see it)."
+        fi
+
+        # Newest first: gfx1100 would also match a bare gfx11* pattern, so the
+        # order matters more than the patterns look like it does.
+        case "$GFX" in
+            *gfx12*)          GFX_FAM="RDNA4"; GFX_SUGGEST="12.0.0" ;;
+            *gfx11*)          GFX_FAM="RDNA3"; GFX_SUGGEST="11.0.0" ;;
+            *gfx103*)         GFX_FAM="RDNA2"; GFX_SUGGEST="10.3.0" ;;
+            *gfx94*|*gfx90a*) GFX_FAM="CDNA";  GFX_SUGGEST="" ;;
+            *)                GFX_FAM="";      GFX_SUGGEST="" ;;
+        esac
+        # Not `[ -n ... ] && say ...`: a false test returns non-zero, which under
+        # `set -e` exits. Same trap as the pipeline above.
+        if [ -n "$GFX_FAM" ]; then say "that is $GFX_FAM"; fi
+
+        if [ -n "$HSA_OVERRIDE" ]; then
+            say "HSA_OVERRIDE_GFX_VERSION=$HSA_OVERRIDE will be set in the drop-in"
+        else
+            case "$GFX_FAM" in
+                RDNA4)
+                    # Deliberately hedged. Whether this works depends on how new
+                    # the ROCm build inside your Ollama is, and that is not
+                    # something this script can inspect.
+                    warn "RDNA4 is recent enough that support depends on the ROCm build bundled"
+                    warn "with your Ollama version. If it reports 'no compatible GPUs' below,"
+                    warn "re-run with --hsa-override ${GFX_SUGGEST}, and if that fails, 11.0.0."
+                    ;;
+                RDNA3|CDNA)
+                    say "$GFX_FAM is officially supported - an override is usually unnecessary."
+                    if [ -n "$GFX_SUGGEST" ]; then
+                        say "If Ollama says 'no compatible GPUs' below, try --hsa-override $GFX_SUGGEST."
+                    fi
+                    ;;
+                RDNA2)
+                    warn "RDNA2 consumer cards usually need --hsa-override $GFX_SUGGEST."
+                    ;;
+                *)
+                    warn "many consumer AMD cards need --hsa-override"
+                    warn "(RDNA4: 12.0.0, RDNA3: 11.0.0, RDNA2: 10.3.0)."
+                    warn "If Ollama reports 'no compatible GPUs' below, that is the first thing to try."
+                    ;;
+            esac
         fi
         ;;
     cpu)
         warn "CPU mode: models will run, MoE models tolerably, dense models very slowly."
         ;;
 esac
+
+# ----- how much GPU memory, and therefore which model ------------------------
+#
+# Reported, never enforced. The point is to answer "what should I pull?" at the
+# moment the question comes up, rather than leaving someone to pull a 32B onto a
+# 16 GB card and conclude the tool is broken when it crawls. Parsing is guarded
+# both ways: a number outside a plausible range is treated as no number at all,
+# because a confidently wrong VRAM figure is worse than an absent one.
+VRAM_MB=""
+case "$GPU" in
+    nvidia)
+        VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null \
+                  | head -1 | tr -dc '0-9' || true)
+        ;;
+    amd)
+        if command -v rocm-smi >/dev/null 2>&1; then
+            # rocm-smi's output has changed shape across versions; take the first
+            # integer on a line mentioning total, then sanity-check it below.
+            VRAM_MB=$(rocm-smi --showmeminfo vram 2>/dev/null \
+                      | grep -iE 'total' | grep -oE '[0-9]{4,}' | head -1 || true)
+            # Some versions report bytes rather than MB.
+            if [ -n "$VRAM_MB" ] && [ "$VRAM_MB" -gt 1048576 ] 2>/dev/null; then
+                VRAM_MB=$((VRAM_MB / 1024 / 1024))
+            fi
+        fi
+        ;;
+esac
+if [ -n "$VRAM_MB" ] && [ "$VRAM_MB" -ge 1024 ] 2>/dev/null && [ "$VRAM_MB" -le 262144 ] 2>/dev/null; then
+    VRAM_GB=$((VRAM_MB / 1024))
+    say "GPU memory: about ${VRAM_GB} GB"
+    if   [ "$VRAM_GB" -ge 32 ]; then FITS="32B at long context, or a 70B dense with care"
+    elif [ "$VRAM_GB" -ge 22 ]; then FITS="27B-32B, or a 30B MoE"
+    elif [ "$VRAM_GB" -ge 14 ]; then FITS="14B, or a 20B MoE"
+    elif [ "$VRAM_GB" -ge 10 ]; then FITS="8B-14B"
+    else                             FITS="3B-8B"
+    fi
+    say "comfortable here: $FITS (docs/inference-host.md section 6 has the table)"
+    if [ -z "$PULL_MODEL" ]; then
+        # Prove the path with something that pulls in a minute. A first run that
+        # fails after a 20 GB download tells you nothing you could not have
+        # learned from a 2 GB one.
+        say "to verify the whole path first, re-run with: --pull llama3.2:3b"
+    fi
+elif [ "$GPU" != cpu ]; then
+    warn "could not read GPU memory - size models by hand (docs/inference-host.md section 6)."
+fi
 
 # ----- Ollama itself ---------------------------------------------------------
 if command -v ollama >/dev/null 2>&1 && [ "$UPDATE" -eq 0 ]; then

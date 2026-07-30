@@ -80,13 +80,32 @@ Two AMD-specific things that catch people:
 - **Group membership is mandatory.** Without `render` and `video`, ROCm sees
   no device and Ollama silently falls back to CPU. If generation is
   inexplicably slow, check `groups` before anything else.
+- **Find out what card you actually have, in ROCm's terms.** The override below
+  lies to ROCm about your gfx target, so knowing the real one turns guesswork
+  into a lookup:
+
+  ```bash
+  rocminfo | grep -m2 gfx        # e.g. gfx1100 (RX 7900 XTX), gfx1201 (RX 9060 XT)
+  ```
+
+  `tools/install-ollama.sh` prints this for you and names the family.
+
 - **Consumer cards may need a version override.** ROCm officially supports a
   short list (RX 7900 XTX/XT, W7900, MI-series); many others work once you
-  claim a supported architecture. RDNA3 cards generally take
-  `HSA_OVERRIDE_GFX_VERSION=11.0.0`, RDNA2 `10.3.0`. Set it in the Ollama
-  service override in §4. Ollama's `docs/gpu.md` keeps the current
-  compatibility list - check there rather than trusting any table's age,
-  including this one.
+  claim a supported architecture. Set it in the Ollama service override in §4.
+
+  | Family | gfx | `HSA_OVERRIDE_GFX_VERSION` |
+  |---|---|---|
+  | RDNA4 (RX 9000) | gfx120x | `12.0.0`, falling back to `11.0.0` |
+  | RDNA3 (RX 7000) | gfx110x | `11.0.0` - often unnecessary, 7900 XTX is supported outright |
+  | RDNA2 (RX 6000) | gfx103x | `10.3.0` |
+  | CDNA (MI-series) | gfx90a, gfx94x | none |
+
+  **RDNA4 is the one to expect friction from.** Whether it works depends on how
+  new the ROCm build bundled inside your Ollama is, and no table can tell you
+  that - only trying it. If Ollama reports "no compatible GPUs", work down the
+  fallbacks. Ollama's `docs/gpu.md` keeps the current compatibility list; check
+  there rather than trusting any table's age, including this one.
 
 Either vendor: confirm the card is actually being used before moving on. A
 model that loads onto CPU still answers, just at one or two tokens a second,
