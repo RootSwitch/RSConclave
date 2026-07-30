@@ -7,7 +7,7 @@ import type {
   TranscriptEntry,
 } from './types.ts';
 import { estimateMessages } from './tokens.ts';
-import { stripThink } from './text.ts';
+import { isFinishedTurn, stripThink } from './text.ts';
 
 /** Round-robin: next participant after the one who spoke last (or the first). */
 export function nextSpeaker(config: RoundtableConfig, entries: TranscriptEntry[]): Participant {
@@ -57,10 +57,9 @@ export function buildMessages(
 ): ChatMessage[] {
   const messages: ChatMessage[] = [{ role: 'system', content: buildSystemPrompt(p, config, personas) }];
 
-  // Consolidation/judge entries are meta-commentary, not conversation turns.
-  let usable = entries.filter(
-    (e) => e.kind !== 'error' && e.kind !== 'consolidation' && stripThink(e.text) !== '',
-  );
+  // Consolidation/judge entries are meta-commentary, not conversation turns;
+  // isFinishedTurn drops errors and cancelled partials.
+  let usable = entries.filter((e) => e.kind !== 'consolidation' && isFinishedTurn(e));
 
   // Truncation: keep-last-N window (system prompt always kept).
   let truncated = false;

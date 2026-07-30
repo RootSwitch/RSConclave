@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **"Partial output kept" now means one thing everywhere.** A cancelled reply
+  was context in the roundtable and in the council's consolidator but not in
+  chat, council follow-ups or a pipeline stage, while the badge said the same
+  words in all of them. The rule was written out separately in six places and
+  three of them disagreed - the council disagreed with itself, feeding a
+  fragment to the consolidator that its own follow-up rounds withheld.
+
+  One predicate now answers for all six. A cancelled generation is a fragment,
+  often mid-sentence, so it is never handed over as a finished turn: it is out
+  of every conversational history. The two places that render a LABELLED
+  transcript - the council's `{{RESPONSES}}` block and the judge transcript -
+  include it marked `(INCOMPLETE - CANCELLED PART-WAY)` instead, because the
+  format can say what it is and reporting "no response" would contradict the
+  text on screen. The badge tooltip now says the partial is kept to read, copy
+  or continue and is not sent as context.
+
+  `continue` is the way back: it works on a cancelled reply now, not just one
+  that hit its token limit, and finishing it clears the marker so the reply
+  counts as context again. Verified against a recording endpoint - a completed
+  turn still reaches the next speaker, the fragment does not, `continue` does
+  receive the partial it is asked to extend, and cancelling the continuation
+  leaves the entry marked.
+
 - **A dropped connection no longer throws you into the live run and eats what
   you were typing.** Two review findings that turn out to be the same moment.
   Every SSE connect delivers a state snapshot, and the handler remounted the

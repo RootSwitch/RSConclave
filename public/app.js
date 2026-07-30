@@ -157,7 +157,13 @@ function entryStatus(entry, complete) {
     return [el('span', { class: 'sev crit', title: entry.error || 'error' }, 'error')];
   }
   if (entry.error === 'cancelled') {
-    return [el('span', { class: 'sev warn', title: 'partial output kept' }, 'cancelled')];
+    // Says what "kept" means. The old label was just "partial output kept",
+    // which read as "kept, so it still counts" - and in half the modes it did
+    // and in half it did not. It is kept to read, copy and continue; it is not
+    // handed to later turns as though it were a finished answer.
+    return [el('span', { class: 'sev warn',
+      title: 'Stopped part-way. The partial text is kept here to read, copy or continue, but it is not sent as context to later turns.',
+    }, 'cancelled')];
   }
   if (!complete) {
     // An open <think> with no close yet means the model is still reasoning -

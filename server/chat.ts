@@ -1,7 +1,7 @@
 // Plain 1:1 chat. The simplest mode: no speaker labels, no turn order -
 // just the transcript mapped straight onto user/assistant roles.
 import type { ChatConfig, ChatMessage, Persona, TranscriptEntry } from './types.ts';
-import { stripThink } from './text.ts';
+import { isFinishedTurn, stripThink } from './text.ts';
 
 export function buildSystemPrompt(config: ChatConfig, personas: Persona[]): string {
   const layers: string[] = [];
@@ -21,9 +21,8 @@ export function buildChatMessages(
   if (system) messages.push({ role: 'system', content: system });
 
   for (const e of entries) {
-    if (e.kind === 'error' || e.error) continue;
+    if (!isFinishedTurn(e)) continue; // see isFinishedTurn: cancelled partials are not turns
     const text = e.kind === 'user' ? e.text : stripThink(e.text);
-    if (!text.trim()) continue;
     // merge consecutive same-role turns so roles strictly alternate
     const role = e.kind === 'user' ? 'user' : 'assistant';
     const last = messages[messages.length - 1];

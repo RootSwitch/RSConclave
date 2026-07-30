@@ -202,10 +202,14 @@ const Chat = {
         if (complete && e.text) footer.push(forkButton(session.id, e.id));
         // Only the newest reply can be continued: extending an older one would
         // rewrite history the later turns were already answering.
-        if (complete && e.truncated && !mine && e === session.entries.at(-1)) {
+        // A cancelled reply is continuable for the same reason a token-limited
+        // one is, and it is the way to promote a partial back into context.
+        if (complete && (e.truncated || e.error === 'cancelled') && !mine && e === session.entries.at(-1)) {
           footer.push(el('button', {
             class: 'mini',
-            title: 'This reply stopped at its token limit. Extend it in place.',
+            title: e.truncated
+              ? 'This reply stopped at its token limit. Extend it in place.'
+              : 'You stopped this reply. Finish it in place - once complete it counts as context again.',
             onclick: () => Api.chatContinue().catch((err) => alert(err.message)),
           }, 'continue'));
         }

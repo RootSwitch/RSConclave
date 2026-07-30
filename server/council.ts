@@ -1,6 +1,6 @@
 // Council mode: transcript assembly and consolidator prompt templating.
 import type { ChatMessage, CouncilConfig, TranscriptEntry } from './types.ts';
-import { stripThink } from './text.ts';
+import { incompleteNote, isFinishedTurn, stripThink } from './text.ts';
 import { ballotInstruction } from './vote.ts';
 
 /**
@@ -13,7 +13,9 @@ export function renderResponses(config: CouncilConfig, entries: TranscriptEntry[
     const m = config.members[i];
     const entry = entries.filter((e) => e.memberIndex === i).at(-1);
     if (entry && entry.kind !== 'error' && entry.text.trim()) {
-      blocks.push(`=== RESPONSE FROM: ${m.model} ===\n${stripThink(entry.text)}\n=== END RESPONSE ===`);
+      // Labelled format, so a cancelled partial is included and marked rather
+      // than reported as "no response" for text the user can see on screen.
+      blocks.push(`=== RESPONSE FROM: ${m.model}${incompleteNote(entry)} ===\n${stripThink(entry.text)}\n=== END RESPONSE ===`);
     } else {
       blocks.push(`=== RESPONSE FROM: ${m.model} ===\n(no response - error)\n=== END RESPONSE ===`);
     }
@@ -72,7 +74,7 @@ export function buildMemberHistory(
     if (e.kind === 'user') {
       flush();
       msgs.push({ role: 'user', content: e.text });
-    } else if (e.kind === 'participant' && e.memberIndex === memberIndex && !e.error && e.text.trim()) {
+    } else if (e.kind === 'participant' && e.memberIndex === memberIndex && isFinishedTurn(e)) {
       pendingResponse = e.text; // last one in the round wins (reruns)
     }
   }

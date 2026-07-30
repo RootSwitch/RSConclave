@@ -1,6 +1,6 @@
 // Pipeline mode: each stage's template receives the previous stage's output as {{INPUT}}.
 import type { PipelineConfig, TranscriptEntry } from './types.ts';
-import { stripThink } from './text.ts';
+import { isFinishedTurn, stripThink } from './text.ts';
 
 /**
  * The input for a stage: the latest good output of the previous stage,
@@ -12,7 +12,7 @@ export function resolveStageInput(entries: TranscriptEntry[], stageIndex: number
     return user?.text ?? '';
   }
   const prev = entries
-    .filter((e) => e.kind === 'participant' && e.memberIndex === stageIndex - 1 && !e.error && e.text.trim())
+    .filter((e) => e.kind === 'participant' && e.memberIndex === stageIndex - 1 && isFinishedTurn(e))
     .at(-1);
   if (!prev) throw new Error(`stage ${stageIndex} has no input - stage ${stageIndex - 1} produced no output`);
   return stripThink(prev.text);

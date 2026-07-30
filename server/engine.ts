@@ -328,7 +328,10 @@ async function runTurn(a: Active, opts: {
     // Recomputed rather than OR-ed: a continuation that finishes properly must
     // clear the flag, or the Continue button never goes away.
     entry.truncated = result.doneReason === 'length' || undefined;
-    if (result.aborted) entry.error = 'cancelled';
+    // Assigned rather than only set-on-abort: continuing a CANCELLED entry has
+    // to be able to clear the marker, or a finished reply would keep claiming it
+    // was cut short and stay excluded from context for the rest of the session.
+    entry.error = result.aborted ? 'cancelled' : undefined;
   } catch (err: any) {
     if (a.abort?.signal.aborted) {
       entry.error = 'cancelled';
@@ -931,12 +934,24 @@ export function chatContinue(username: string): void {
   if (a.session.mode !== 'chat') throw new Error('not a chat session');
   if (a.phase === 'generating') throw new Error('a generation is already running');
   const last = a.session.entries.at(-1);
-  if (!last || last.kind !== 'participant' || last.error || !last.text.trim()) {
+  // A cancelled partial is continuable - that is the point of keeping it. Any
+  // other error is not: there is nothing coherent to continue from.
+  if (!last || last.kind !== 'participant' || (last.error && last.error !== 'cancelled') || !last.text.trim()) {
     throw new Error('there is no reply to continue');
   }
   const config = a.session.config as ChatConfig;
   launch(async () => {
-    const messages = chat.buildChatMessages(config, a.session.entries, getPersonas(a.owner));
+    /*
+     * Build context with the cancelled marker cleared on the entry being
+     * continued. Everywhere else a cancelled partial is deliberately withheld
+     * from the model, but here the whole request is "carry on from this text",
+     * so the model has to see it. Cloned rather than mutated: if the
+     * continuation is itself cancelled the stored entry must stay marked.
+     */
+    const forContext = last.error
+      ? a.session.entries.map((e) => (e === last ? { ...e, error: undefined } : e))
+      : a.session.entries;
+    const messages = chat.buildChatMessages(config, forContext, getPersonas(a.owner));
     messages.push({
       role: 'user',
       content:
