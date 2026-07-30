@@ -396,6 +396,109 @@ function forkButton(sessionId, entryId) {
  * destructive to whatever is mid-flight, so it stays a decision.
  */
 /*
+ * Drafts that survive a re-render.
+ *
+ * The compose bar, the roundtable gate bar and the council follow-up band are
+ * rebuilt with replaceChildren on EVERY state event - and a state event arrives
+ * from a second tab, from an SSE reconnect, and after every turn. So a
+ * half-typed message, inject or follow-up was silently destroyed by something
+ * the user did not do. Keeping the text in a map keyed per field means the
+ * rebuild is free to throw the DOM away.
+ *
+ * clearDraft is called on a successful submit - not on rebuild - so the box
+ * only empties when the text actually went somewhere.
+ */
+const drafts = new Map();
+
+const draftCarets = new Map();
+let draftFocused = null; // key of the field the user was last typing in
+
+/**
+ * Wire an input/textarea to a draft key: restores on create, records on input.
+ *
+ * Restoring the caret and the focus matters as much as restoring the text. A
+ * rebuild detaches the node you are typing in, which drops focus to <body> - so
+ * keeping the text but not the focus just means the next dozen keystrokes go
+ * nowhere, which is harder to notice than losing the text outright.
+ */
+function keepDraft(key, node) {
+  const caretable = !!node.setSelectionRange && node.type !== 'number';
+  const saved = drafts.get(key);
+  if (saved !== undefined && saved !== '') {
+    node.value = saved;
+    if (caretable) {
+      const at = draftCarets.get(key) ?? node.value.length;
+      try { node.setSelectionRange(at, at); } catch {}
+    }
+  }
+  node.addEventListener('input', () => {
+    drafts.set(key, node.value);
+    if (caretable) draftCarets.set(key, node.selectionStart);
+    // Keys carry a session id so a draft cannot surface in the wrong
+    // conversation, which means they accumulate as you browse. Map keeps
+    // insertion order, so dropping from the front discards the least recently
+    // started draft - far more than anyone has open at once.
+    while (drafts.size > 24) {
+      const oldest = drafts.keys().next().value;
+      drafts.delete(oldest);
+      draftCarets.delete(oldest);
+    }
+  });
+  node.addEventListener('focus', () => { draftFocused = key; });
+  /*
+   * Only a user-driven blur means they left the field; a blur caused by the
+   * rebuild ripping the node out must NOT clear the flag, or the replacement
+   * field will not know to take the focus back.
+   *
+   * The check is deferred because the two are indistinguishable at blur time -
+   * Chrome dispatches blur during removal while the node still reports
+   * isConnected true. One turn of the event loop later a removed node is
+   * plainly disconnected. setTimeout rather than a microtask so it lands after
+   * the replacement's refocus below.
+   */
+  node.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (draftFocused === key && node.isConnected) draftFocused = null;
+    }, 0);
+  });
+
+  if (draftFocused === key) {
+    // Deferred because keepDraft runs while the node is still detached, and
+    // focus() on a detached node does nothing. The whole render is synchronous,
+    // so by the time microtasks run the node is in the document.
+    queueMicrotask(() => {
+      if (!node.isConnected) return;
+      const a = document.activeElement;
+      if (a && a !== document.body) return; // they moved on; do not yank them back
+      node.focus();
+      if (caretable) {
+        const at = draftCarets.get(key) ?? node.value.length;
+        try { node.setSelectionRange(at, at); } catch {}
+      }
+    });
+  }
+  return node;
+}
+
+function clearDraft(key) {
+  drafts.delete(key);
+  draftCarets.delete(key);
+  if (draftFocused === key) draftFocused = null;
+}
+
+/**
+ * Focus without stealing it. A rebuild that unconditionally focused its own box
+ * pulled the caret out of whatever the user was actually typing in - including
+ * a field in a different panel. If something focusable is still focused, leave
+ * it alone; if the old node was just detached, activeElement falls back to body
+ * and focusing is the right move.
+ */
+function focusIfIdle(node) {
+  const a = document.activeElement;
+  if (!a || a === document.body) node.focus();
+}
+
+/*
  * Run an async click handler at most once at a time.
  *
  * The server-side race that let a double Enter start two generations is fixed,
@@ -753,14 +856,35 @@ function renderStatus() {
 function connectSse() {
   const es = new EventSource('/events');
 
+  /*
+   * A snapshot arrives on every connect - including the silent reconnects
+   * EventSource does after a network blip, a laptop waking, or a server
+   * restart. It used to remount the active run's view unconditionally, so a
+   * user reading a different session, editing Settings, or halfway through a
+   * setup form was yanked to the live run and lost what they had typed, for no
+   * reason they could see.
+   *
+   * Attaching on the FIRST snapshot is the behaviour worth keeping: open the app
+   * with a run in progress and it takes you there. After that, a snapshot only
+   * refreshes what you are already looking at.
+   */
+  let firstSnapshot = true;
   es.addEventListener('snapshot', (ev) => {
     const { state, session } = JSON.parse(ev.data);
     App.runState = state;
     if (session) {
-      // an active run exists on the server - attach to it
-      App.session = session;
-      mountSessionView(session);
+      if (App.session?.id === session.id) {
+        // Already attached: take the fresh data (the run may have advanced
+        // while we were disconnected) without remounting, so drafts and scroll
+        // position survive.
+        App.session = session;
+        currentViewRenderContent();
+      } else if (firstSnapshot && !App.session) {
+        App.session = session;
+        mountSessionView(session);
+      }
     }
+    firstSnapshot = false;
     renderStatus();
     renderSessionList();
     currentViewUpdate();

@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- **A dropped connection no longer throws you into the live run and eats what
+  you were typing.** Two review findings that turn out to be the same moment.
+  Every SSE connect delivers a state snapshot, and the handler remounted the
+  active run's view unconditionally - so a silent EventSource reconnect after a
+  network blip, a laptop waking, or a server restart yanked you out of whatever
+  session you were reading and into the run. Reproduced: viewing a finished chat
+  while a roundtable was live, dropping the stream moved the view to the
+  roundtable within one retry. Now the first snapshot still attaches (opening the
+  app with a run in progress should take you to it), while later ones only
+  refresh the view you already have open.
+
+  The same rebuild was destroying in-progress text. The compose bar, the
+  roundtable gate bar and the council follow-up band are rebuilt with
+  `replaceChildren` on every state event - and a state event arrives from a
+  second tab, from a reconnect, and after every turn - so a half-written
+  message, inject or follow-up vanished, and an Auto count you had set to 20
+  reset itself to 5. Those fields now keep their text in a registry keyed per
+  field and per session, so the rebuild is free to throw the DOM away and a
+  draft written to one chat cannot surface in another. They are cleared on a
+  successful submit rather than on rebuild, and restored if the submit fails.
+
+  Focus and caret are restored too, which matters as much as the text: the
+  rebuild detaches the node you are typing in and focus falls to `<body>`, so
+  keeping the text without the focus just means the next dozen keystrokes go
+  nowhere - harder to notice than losing the text outright. Verified with real
+  clicks and keystrokes: text, caret position and focus all survive, continued
+  typing lands in the right place, and a field you deliberately clicked away
+  from does not steal the focus back.
+
 - **A stopped run can no longer mark its replacement as finished.** The
   independent review's one high finding, and it survived verification. Every
   run's tail code - `finishRun()`, the "back to the gate" blocks after a turn

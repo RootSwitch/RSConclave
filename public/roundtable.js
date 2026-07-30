@@ -455,8 +455,11 @@ const Roundtable = {
       this.updateState(); // swap Step vs Speak controls for human/model
     };
 
-    const autoN = el('input', { type: 'number', min: '1', max: '50', value: '5' });
-    const injectText = el('textarea', { rows: 2, class: 'grow', placeholder: 'Inject a message into the conversation…' });
+    // Drafted: this whole bar is rebuilt on every state event, so an Auto count
+    // you had set back to 20 reset itself to 5 whenever anything happened.
+    const autoN = keepDraft(`rt-auto:${session.id}`, el('input', { type: 'number', min: '1', max: '50', value: '5' }));
+    const injectText = keepDraft(`rt-inject:${session.id}`,
+      el('textarea', { rows: 2, class: 'grow', placeholder: 'Inject a message into the conversation…' }));
 
     const doInject = async (as) => {
       const text = injectText.value.trim();
@@ -464,20 +467,23 @@ const Roundtable = {
       try {
         await once('rt-inject', () => Api.rtInject(text, as));
         injectText.value = '';
+        clearDraft(`rt-inject:${session.id}`);
       } catch (err) { alert(err.message); }
     };
 
     const turnControls = [];
     if (chosen?.kind === 'human') {
-      const speakText = el('textarea', {
+      const speakText = keepDraft(`rt-speak:${session.id}`, el('textarea', {
         rows: 2, class: 'grow',
         placeholder: `Speak as ${chosen.name}… (Enter to speak, Shift+Enter for a newline)`,
-      });
+      }));
       const speak = async () => {
         const text = speakText.value.trim();
         if (!text) return;
         try {
           await once('rt-human', () => Api.rtHumanTurn(chosen.id, text));
+          speakText.value = '';
+          clearDraft(`rt-speak:${session.id}`);
           this.gateNextOverride = null;
         } catch (err) { alert(err.message); }
       };

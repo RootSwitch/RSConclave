@@ -486,11 +486,21 @@ const Council = {
   renderFollowup(session, generating) {
     this.followupWrap.replaceChildren();
     if (generating || !session.entries.some((e) => e.kind === 'consolidation')) return;
-    const ta = el('textarea', { rows: 3, placeholder: 'Ask the council a follow-up - each member answers with its own previous response as context… (Enter to ask, Shift+Enter for a newline)' });
+    // Drafted: this band is rebuilt on every state event, which used to eat a
+    // half-written follow-up whenever anything else happened.
+    const draftKey = `council-followup:${session.id}`;
+    const ta = keepDraft(draftKey,
+      el('textarea', { rows: 3, placeholder: 'Ask the council a follow-up - each member answers with its own previous response as context… (Enter to ask, Shift+Enter for a newline)' }));
     const ask = () => {
       const p = ta.value.trim();
       if (!p) return;
-      once('council-followup', () => Api.councilFollowup(session.id, p)).catch((e) => alert(e.message));
+      ta.value = '';
+      clearDraft(draftKey);
+      once('council-followup', () => Api.councilFollowup(session.id, p)).catch((e) => {
+        ta.value = p; // failed ask: give the text back
+        drafts.set(draftKey, p);
+        alert(e.message);
+      });
     };
     onEnterSend(ta, ask);
     this.followupWrap.append(el('div', { class: 'setup-band' },

@@ -245,14 +245,24 @@ const Chat = {
       return;
     }
 
-    const box = el('textarea', { rows: 3, class: 'grow', placeholder: 'Message… (Enter to send, Shift+Enter for a newline)' });
+    // Keyed by session so a message half-written to one chat does not appear
+    // in the compose box of the next one you open.
+    const draftKey = `chat-compose:${session.id}`;
+    const box = keepDraft(draftKey,
+      el('textarea', { rows: 3, class: 'grow', placeholder: 'Message… (Enter to send, Shift+Enter for a newline)' }));
     const send = async () => {
       const text = box.value.trim();
       if (!text) return;
       box.value = '';
+      clearDraft(draftKey); // only once the text has actually gone somewhere
       try {
         await once('chat-send', () => Api.chatSend(text));
-      } catch (err) { alert(err.message); }
+      } catch (err) {
+        // Put it back rather than losing it to a failed send.
+        box.value = text;
+        drafts.set(draftKey, text);
+        alert(err.message);
+      }
     };
     onEnterSend(box, send);
 
@@ -270,6 +280,6 @@ const Chat = {
     );
     // append(null) would render a literal "null" text node
     if (st.lastError) this.composeBar.append(el('div', { class: 'error-text' }, st.lastError));
-    box.focus();
+    focusIfIdle(box);
   },
 };
