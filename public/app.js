@@ -529,7 +529,15 @@ async function withBoxFree(action) {
   try {
     return await action();
   } catch (err) {
-    if (!/box is busy|already running/i.test(err.message || '')) throw err;
+    const message = err.message || '';
+    /*
+     * Only offer the takeover for a run this user owns. The prompt used to fire
+     * for ANOTHER user's generation too, promising to stop something the server
+     * would refuse - confirming then produced a raw "running another user's
+     * session" alert. The server now words those two cases differently.
+     */
+    if (/another user/i.test(message)) throw err;
+    if (!/box is busy|already running/i.test(message)) throw err;
     if (!confirm('The box is busy with your current run.\n\nStop it and continue?')) return undefined;
     await Api.stopRun();
     return await action();

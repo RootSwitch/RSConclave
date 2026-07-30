@@ -509,7 +509,21 @@ const Roundtable = {
         el('label', {}, 'Next:'),
         nextSel,
         ...turnControls,
-        el('button', { onclick: () => once('rt-reroll', () => Api.rtReroll()).catch((e) => alert(e.message)) }, 'Reroll last'),
+        el('button', {
+          title: 'Drop the last turn and take it again. Rerolling your own typed turn hands the text back to the speak box.',
+          onclick: () => once('rt-reroll', async () => {
+            const res = await Api.rtReroll();
+            // A human seat has nothing to re-generate, so the server returns the
+            // text instead of discarding it. Put it back where it was typed and
+            // point the gate at that seat, which round-robin cannot infer now
+            // that the turn is gone from the transcript.
+            if (res?.restored) {
+              this.gateNextOverride = res.restored.participantId;
+              drafts.set(`rt-speak:${session.id}`, res.restored.text);
+              this.updateState();
+            }
+          }).catch((e) => alert(e.message)),
+        }, 'Reroll last'),
         el('span', { class: 'grow' }),
         el('button', { class: 'danger', onclick: () => {
           if (confirm('End this roundtable?')) Api.rtStop().catch((e) => alert(e.message));

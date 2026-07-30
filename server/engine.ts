@@ -223,10 +223,20 @@ function releaseActive(username: string): void {
   }
 }
 
-function assertIdle(): void {
-  if (active && active.phase === 'generating') {
-    throw new InputError('the box is busy with a generation - try again when it finishes', 409);
+/*
+ * The box holds one model, so one generation at a time - but WHOSE generation
+ * decides what the caller can do about it. Both cases threw the same words, so
+ * the client's recovery prompt offered "stop it and continue" for a run it had
+ * no right to stop, and confirming produced a raw "running another user's
+ * session" alert. Distinct messages let the client offer the takeover only when
+ * the run is actually the caller's.
+ */
+function assertIdle(username: string): void {
+  if (!active || active.phase !== 'generating') return;
+  if (active.owner !== username) {
+    throw new InputError('another user is generating on the box right now - try again shortly', 409);
   }
+  throw new InputError('the box is busy with a generation - try again when it finishes', 409);
 }
 
 /** The active run, and it must be yours. */
@@ -374,7 +384,7 @@ function makeTitle(text: string): string {
 // ---------------- Council ----------------
 
 export function startCouncil(username: string, config: CouncilConfig): string {
-  assertIdle();
+  assertIdle(username);
   // Validate BEFORE displacing anything. takeover() clears another user's
   // parked run, so a request that then threw on its own bad config destroyed
   // someone else's session and accomplished nothing.
@@ -480,7 +490,7 @@ function finishRun(a: Active): void {
 }
 
 export function rerunMember(username: string, sessionId: string, memberIndex: number): void {
-  assertIdle();
+  assertIdle(username);
   const a = requireSession(username, sessionId);
   const config = a.session.config as CouncilConfig;
   const m = config.members[memberIndex];
@@ -497,7 +507,7 @@ export function rerunMember(username: string, sessionId: string, memberIndex: nu
 }
 
 export function consolidate(username: string, sessionId: string, template?: string, member?: CouncilMember): void {
-  assertIdle();
+  assertIdle(username);
   const a = requireSession(username, sessionId);
   const config = a.session.config as CouncilConfig;
   if (template) config.consolidator.template = template;
@@ -517,7 +527,7 @@ export function consolidate(username: string, sessionId: string, template?: stri
 
 /** Follow-up round: every member answers a new prompt with their own history as context. */
 export function councilFollowup(username: string, sessionId: string, prompt: string): void {
-  assertIdle();
+  assertIdle(username);
   if (!prompt?.trim()) throw new InputError('follow-up prompt is empty');
   const a = requireSession(username, sessionId);
   if (a.session.mode !== 'council') throw new InputError('not a council session');
@@ -552,7 +562,7 @@ function requireSession(username: string, sessionId: string): Active {
 // ---------------- Roundtable ----------------
 
 export function startRoundtable(username: string, config: RoundtableConfig): string {
-  assertIdle();
+  assertIdle(username);
   // Validated before takeover - see startCouncil.
   if (!config?.participants?.length || config.participants.length < 2) {
     throw new InputError('need at least 2 participants');
@@ -585,7 +595,7 @@ export function startRoundtable(username: string, config: RoundtableConfig): str
 }
 
 export function resumeSession(username: string, sessionId: string): Session {
-  assertIdle();
+  assertIdle(username);
   const a = requireSession(username, sessionId);
   a.phase = a.session.mode === 'roundtable' ? 'awaiting_gate' : 'done';
   persist();
@@ -667,7 +677,7 @@ export function consolidateRoundtable(
   member: CouncilMember,
   template: string,
 ): void {
-  assertIdle();
+  assertIdle(username);
   const a = requireSession(username, sessionId);
   if (a.session.mode !== 'roundtable') throw new InputError('not a roundtable session');
   const transcript = renderTranscriptText(a.session.entries);
@@ -700,7 +710,13 @@ export function inject(username: string, text: string, as: 'narrator' | 'user'):
   pushState();
 }
 
-export function rerollLast(username: string): void {
+/**
+ * Drop the last turn and take it again.
+ *
+ * Returns the human's text when the turn being rerolled was typed rather than
+ * generated, so the caller can put it back in the speak box.
+ */
+export function rerollLast(username: string): { restored?: { participantId: string; name: string; text: string } } {
   const a = assertOwn(username);
   if (a.session.mode !== 'roundtable') throw new InputError('not a roundtable session');
   if (a.phase === 'generating') throw new InputError('a generation is already running', 409);
@@ -708,6 +724,9 @@ export function rerollLast(username: string): void {
   let idx = entries.length - 1;
   while (idx >= 0 && entries[idx].kind !== 'participant' && entries[idx].kind !== 'error') idx--;
   if (idx < 0) throw new InputError('nothing to reroll');
+  const target = entries[idx];
+  const seat = (a.session.config as RoundtableConfig).participants
+    ?.find((p) => p.id === target.participantId);
   // Splice returns everything from idx onward. Broadcasting only removed[0]
   // left any trailing narrator/user injection visible in the browser while it
   // was already gone from disk - reroll after an inject silently diverged.
@@ -715,13 +734,25 @@ export function rerollLast(username: string): void {
   persist();
   for (const e of removed) broadcast('remove-entry', { entryId: e.id }, a.owner);
   a.autoRemaining = 0;
+  /*
+   * A human seat has nothing to re-generate: roundtableLoop stops as soon as the
+   * next speaker is a person. So pressing Reroll after typing your own turn
+   * deleted what you wrote and then did nothing whatsoever. Hand the text back
+   * instead, and leave the gate on that seat so it lands where it came from.
+   */
+  if (seat?.kind === 'human') {
+    a.phase = 'awaiting_gate';
+    pushState();
+    return { restored: { participantId: seat.id, name: seat.name, text: target.text } };
+  }
   launch(() => roundtableLoop(removed[0].participantId));
+  return {};
 }
 
 // ---------------- Chat ----------------
 
 export function startChat(username: string, config: ChatConfig): string {
-  assertIdle();
+  assertIdle(username);
   if (!config?.model || !config.endpointId) throw new InputError('pick an endpoint and model');
   releaseActive(username);
   takeover(username);
@@ -770,10 +801,26 @@ export function chatRegenerate(username: string): void {
   if (a.session.mode !== 'chat') throw new InputError('not a chat session');
   if (a.phase === 'generating') throw new InputError('a generation is already running', 409);
   const entries = a.session.entries;
-  let idx = entries.length - 1;
-  while (idx >= 0 && entries[idx].kind === 'user') idx--;
-  if (idx < 0) throw new InputError('nothing to regenerate');
-  const removed = entries.splice(idx);
+  const last = entries.at(-1);
+  if (!last) throw new InputError('nothing to regenerate');
+  /*
+   * The transcript ends with a message that never got a reply. That happens when
+   * the turn failed before its entry existed - endpointById throws inside
+   * runTurn ahead of addEntry, which is exactly what a saved session holds once
+   * its endpoint is deleted in Settings. There is nothing to throw away here, so
+   * answer the question.
+   *
+   * The old walk-back went PAST the unanswered message to the previous reply and
+   * spliced from there, which destroyed what the person had just typed and
+   * re-answered the question before it. With a single user entry it found
+   * nothing at all and threw "nothing to regenerate", leaving retyping - into a
+   * doubled user turn - as the only way forward.
+   */
+  if (last.kind === 'user') {
+    launch(runChatTurn);
+    return;
+  }
+  const removed = entries.splice(entries.length - 1);
   persist();
   for (const e of removed) broadcast('remove-entry', { entryId: e.id }, a.owner);
   launch(runChatTurn);
@@ -797,7 +844,7 @@ async function runChatTurn(): Promise<void> {
 // ---------------- Pipeline ----------------
 
 export function startPipeline(username: string, config: PipelineConfig): string {
-  assertIdle();
+  assertIdle(username);
   pipeline.validatePipeline(config); // before takeover - see startCouncil
   releaseActive(username);
   takeover(username);
@@ -856,7 +903,7 @@ async function runPipeline(fromStage: number): Promise<void> {
 
 /** Re-run from a given stage onward (using the existing output of the stage before it). */
 export function rerunPipelineFrom(username: string, sessionId: string, stageIndex: number): void {
-  assertIdle();
+  assertIdle(username);
   const a = requireSession(username, sessionId);
   if (a.session.mode !== 'pipeline') throw new InputError('not a pipeline session');
   const config = a.session.config as PipelineConfig;
@@ -897,7 +944,7 @@ export function stopRun(username: string): void {
  * dropped from the copy and the original is untouched, so both readings survive.
  */
 export function forkSession(username: string, sessionId: string, entryId: string): Session {
-  assertIdle();
+  assertIdle(username);
   const source = store.loadSession<Session>(username, sessionId);
   if (!source) throw new InputError('session not found', 404);
   const cut = source.entries.findIndex((e) => e.id === entryId);

@@ -271,11 +271,22 @@ const Chat = {
     onEnterSend(box, send);
 
     const hasReply = session.entries.some((e) => e.kind !== 'user');
+    // A turn that failed before its reply entry existed leaves the transcript
+    // ending on the question. Without a button for it the only way on was to
+    // retype, which merged into a doubled user turn.
+    const unanswered = session.entries.at(-1)?.kind === 'user';
     this.composeBar.append(
       el('div', { class: 'row' }, box),
       el('div', { class: 'row' },
         el('button', { class: 'primary', onclick: send }, 'Send ▸'),
-        hasReply ? el('button', { onclick: () => once('chat-regen', () => Api.chatRegenerate()).catch((e) => alert(e.message)) }, 'Regenerate') : null,
+        unanswered
+          ? el('button', {
+              title: 'That message never got a reply. Ask again without retyping it.',
+              onclick: () => once('chat-regen', () => Api.chatRegenerate()).catch((e) => alert(e.message)),
+            }, 'Retry ▸')
+          : hasReply
+            ? el('button', { onclick: () => once('chat-regen', () => Api.chatRegenerate()).catch((e) => alert(e.message)) }, 'Regenerate')
+            : null,
         el('span', { class: 'grow' }),
         el('button', { class: 'danger', onclick: () => {
           if (confirm('End this chat?')) Api.stopRun().catch((e) => alert(e.message));

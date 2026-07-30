@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **A message that never got a reply is no longer a dead end.** When a turn
+  failed before its reply entry existed - which is what happens when a saved
+  session's endpoint has since been deleted in Settings - the transcript ended
+  on the question and there was nothing to do about it. Regenerate refused
+  ("nothing to regenerate") on a first message, and on a later one it walked
+  back PAST the unanswered question to the previous reply, so it destroyed what
+  had just been typed and re-answered the message before it. Now an unanswered
+  message is simply answered, and the compose bar offers "Retry" for it instead
+  of leaving retyping - into a doubled user turn - as the only way on.
+
+- **Rerolling your own typed turn hands the text back instead of eating it.**
+  Reroll walks back to the last participant entry, and a human seat's turn is
+  one - but the loop it then started stops immediately when the next speaker is
+  a person. So pressing Reroll after typing your own turn deleted what you wrote
+  and did nothing at all. The text now returns to the speak box with the gate
+  pointed at that seat.
+
+- **The "box is busy" prompt no longer offers to stop a run it cannot.** The
+  offer to stop-and-continue appeared for another user's generation too, and
+  confirming it produced a raw "running another user's session" alert. The two
+  situations now read differently, and the takeover is only offered for a run
+  you own.
+
 - **Login rate limiting now constrains concurrent attackers, not just patient
   ones.** The check ran up front but the counter only incremented after the body
   read and the awaited scrypt, so sixty simultaneous attempts all passed the

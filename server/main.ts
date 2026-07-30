@@ -506,8 +506,9 @@ route('POST', '/api/roundtable/consolidate', async (req, res) => {
   sendJson(res, 200, { ok: true });
 });
 route('POST', '/api/roundtable/reroll', (req, res) => {
-  engine.rerollLast(userOf(req));
-  sendJson(res, 200, { ok: true });
+  // `restored` carries a human seat's text back so the client can refill the
+  // speak box rather than let the reroll destroy it.
+  sendJson(res, 200, { ok: true, ...engine.rerollLast(userOf(req)) });
 });
 route('POST', '/api/roundtable/pause', (req, res) => {
   engine.pause(userOf(req));
