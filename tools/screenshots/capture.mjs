@@ -9,6 +9,7 @@
 // Run via tools/screenshots/run.sh, not directly.
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const CDP = `http://127.0.0.1:${process.env.CDP_PORT ?? 9222}`;
 const APP = process.env.BASE ?? 'http://127.0.0.1:7788';
@@ -159,10 +160,46 @@ for (const shot of SHOTS) {
     await sleep(500);
   }
 
+  /*
+   * PNG, measured rather than assumed: WebP at quality 92 came out LARGER than
+   * PNG for these captures (125 KB against 98 KB for the roundtable). Flat UI
+   * fills and sharp text are what lossless compression is good at, and dropping
+   * WebP quality far enough to win would smear the type - the one thing a UI
+   * screenshot cannot afford. Not worth trying again.
+   */
   const { data } = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
   const file = path.join(OUT, shot.file);
   fs.writeFileSync(file, Buffer.from(data, 'base64'));
   console.log(`  ${file}  ${shot.theme}  ${Math.round(fs.statSync(file).size / 1024)} KB`);
+}
+
+/*
+ * The social preview card: docs/social-preview.png.
+ *
+ * Last, because it composites the hero this run just took - so the card can
+ * never advertise a version of the UI that no longer exists. 1280x640 is
+ * GitHub's recommended 2:1; see social-card.html for why it is mostly type.
+ *
+ * Note this file is NOT used by being committed. GitHub reads the social
+ * preview from a repo setting, so it has to be uploaded there by hand; keeping
+ * it in the tree just means it is versioned and reproducible.
+ */
+{
+  const card = pathToFileURL(path.resolve('tools/screenshots/social-card.html')).href;
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 640, deviceScaleFactor: 1, mobile: false });
+  await send('Page.navigate', { url: card });
+  // Wait for the hero to actually decode, not merely for the page to parse - an
+  // unloaded background would screenshot as an empty panel and still "succeed".
+  await waitFor(`(() => {
+    const img = document.querySelector('img.shot');
+    return !!img && img.complete && img.naturalWidth > 0;
+  })()`, 'the social card hero image to load');
+  await sleep(300); // fonts and the gradient scrim
+
+  const { data } = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+  const file = path.join(OUT, 'social-preview.png');
+  fs.writeFileSync(file, Buffer.from(data, 'base64'));
+  console.log(`  ${file}  1280x640  ${Math.round(fs.statSync(file).size / 1024)} KB`);
 }
 
 ws.close();

@@ -1,0 +1,168 @@
+<!doctype html>
+<!--
+  Source for docs/social-preview.png - the OpenGraph card GitHub shows when the
+  repo is linked in a chat, a feed or a post.
+
+  Composed here as a page and screenshotted rather than assembled in an image
+  editor, for the same reason the rest of this rig exists: it can be regenerated
+  from the current hero and the current palette in one command, so it cannot
+  quietly fall out of date with the app it advertises. It also keeps the project
+  free of image tooling - the browser is already a renderer.
+
+  1280x640 is GitHub's recommended size (2:1). The card is deliberately mostly
+  words: a link preview renders at a few hundred pixels wide, where a full UI
+  screenshot turns to mush. So the hero sits behind a scrim as texture and
+  evidence - you can see it is a multi-speaker conversation - while the reading
+  is carried by type big enough to survive the shrink.
+
+  Regenerate with: tools/screenshots/run.sh
+-->
+<meta charset="utf-8">
+<title>RSConclave social preview</title>
+<style>
+  /* Synthwave, matching the hero screenshot behind it (public/themes.js). */
+  :root {
+    --panel: #1a1030;
+    --panel-2: #251643;
+    --border: #3a2560;
+    --txt: #ece6ff;
+    --txt-dim: #a596c9;
+    --accent: #ff4d8d;
+    --logo-a: #4c8bf5;
+    --logo-b: #2e9b57;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--panel);
+    color: var(--txt);
+    position: relative;
+  }
+
+  /*
+   * The hero, cropped by a frame rather than merely offset.
+   *
+   * Simply sliding the whole 1280x800 image around does not work: scaled to fit
+   * the card it is 637px tall against a 640px frame, so the window header and
+   * the gate bar are always both in shot and there is no offset that shows only
+   * the middle. Nudging it up just traded the header for the gate bar.
+   *
+   * So: a clipping frame over the right side, with the image oversized inside it
+   * and positioned by hero coordinates. Magnifying to 1.31x also makes the
+   * bubble text and the coloured speaker stripes read at all, which is the whole
+   * reason the screenshot is here - it has to say "several models talking", not
+   * "some grey UI".
+   */
+  .shot-frame {
+    position: absolute;
+    top: 0; right: 0; bottom: 0; left: 46%;
+    overflow: hidden;
+  }
+  .shot {
+    position: absolute;
+    width: 1674px;    /* 1.31x of 1280 */
+    left: -314px;     /* hero x 240 (first bubble edge) to the frame's left */
+    top: -196px;      /* hero y 150, below the header; gate bar falls off below */
+    /* Barely touched. Desaturating turned the bubbles into grey noise, and the
+       coloured stripe down each speaker is the tell that this is a roundtable. */
+    filter: brightness(0.96);
+  }
+
+  /* Scrim: opaque under the text, clearing to nothing over the screenshot. */
+  .scrim {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(100deg,
+        var(--panel) 0%,
+        var(--panel) 42%,
+        rgba(26, 16, 48, 0.90) 52%,
+        rgba(26, 16, 48, 0.42) 70%,
+        rgba(26, 16, 48, 0.14) 100%);
+  }
+
+  .content {
+    position: absolute;
+    inset: 0;
+    padding: 74px 0 68px 76px;
+    width: 700px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .brand { display: flex; align-items: center; gap: 16px; }
+  .brand svg { display: block; }
+  .brand-name { font-size: 62px; font-weight: 650; letter-spacing: -1.2px; }
+
+  .rule {
+    width: 96px; height: 5px; border-radius: 3px;
+    background: var(--accent);
+    margin: 26px 0 24px;
+  }
+
+  .lede {
+    font-size: 29px; line-height: 1.36; font-weight: 500;
+    max-width: 600px;
+  }
+  .lede em { color: var(--accent); font-style: normal; font-weight: 650; }
+
+  .sub {
+    margin-top: 20px;
+    font-size: 21px; line-height: 1.45; color: var(--txt-dim);
+    max-width: 585px;
+  }
+
+  .modes {
+    margin-top: auto;
+    display: flex; align-items: center; gap: 12px;
+    font-size: 19px; color: var(--txt-dim);
+  }
+  .pill {
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    border-radius: 999px;
+    padding: 7px 16px;
+    color: var(--txt);
+    font-size: 18px;
+  }
+  .dot { color: var(--border); }
+</style>
+
+<div class="shot-frame"><img class="shot" src="../../docs/img/roundtable.png" alt=""></div>
+<div class="scrim"></div>
+
+<div class="content">
+  <div class="brand">
+    <!-- The app's own mark, at 44px instead of 17. -->
+    <svg width="44" height="44" viewBox="0 0 16 16" fill="none">
+      <rect x="1" y="1" width="6" height="6" rx="1.2" stroke="var(--logo-a)" stroke-width="1.6"/>
+      <rect x="9" y="9" width="6" height="6" rx="1.2" stroke="var(--logo-b)" stroke-width="1.6"/>
+      <path d="M7 4h3a2 2 0 0 1 2 2v3" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>
+    <span class="brand-name">RSConclave</span>
+  </div>
+
+  <div class="rule"></div>
+
+  <!-- The README's own framing, compressed to what survives a link preview. -->
+  <div class="lede">
+    Send one prompt to <em>several models</em> and have another consolidate the
+    answers. Or let them argue it out, turn by turn.
+  </div>
+
+  <div class="sub">
+    A self-hosted web UI for local LLMs, running next to your inference box
+    instead of on one machine.
+  </div>
+
+  <div class="modes">
+    <span class="pill">Chat</span>
+    <span class="dot">·</span>
+    <span class="pill">Council</span>
+    <span class="dot">·</span>
+    <span class="pill">Roundtable</span>
+    <span class="dot">·</span>
+    <span class="pill">Pipeline</span>
+  </div>
+</div>
