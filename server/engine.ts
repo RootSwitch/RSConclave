@@ -908,9 +908,26 @@ export function rerunPipelineFrom(username: string, sessionId: string, stageInde
   if (a.session.mode !== 'pipeline') throw new InputError('not a pipeline session');
   const config = a.session.config as PipelineConfig;
   if (stageIndex < 0 || stageIndex >= config.stages.length) throw new InputError('bad stage index');
+  /*
+   * Discard this stage's output and everything downstream of it - which is what
+   * the button has always claimed to do.
+   *
+   * The server only appended, so a re-run left TWO cards for every stage from
+   * here on with nothing marking which was current. Both kept working "Re-run
+   * from here" buttons, exports carried both outputs, and no "queued"
+   * placeholders appeared during the re-run because the stale entries already
+   * satisfied the view's done-stages check. Nothing downstream is worth keeping
+   * anyway: it was derived from output that is being replaced.
+   */
+  const kept = pipeline.entriesBeforeStage(a.session.entries, stageIndex);
+  const dropped = a.session.entries.filter((e) => !kept.includes(e));
+  a.session.entries = kept;
+  persistOf(a);
+  for (const e of dropped) broadcast('remove-entry', { entryId: e.id, sessionId: a.session.id }, a.owner);
   a.phase = 'generating';
   a.session.status = 'active';
   a.pauseRequested = false;
+  a.lastError = undefined; // the failure being re-run is no longer current
   pushState();
   launch(() => runPipeline(stageIndex));
 }

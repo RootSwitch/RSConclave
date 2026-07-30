@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Pipeline "Re-run from here" now discards what it said it would.** The button
+  has always promised to discard this and later outputs, but the server only
+  appended - so after a re-run the view showed two cards for every stage from
+  that point on, with nothing marking which was current. Both old and new cards
+  kept working "Re-run from here" buttons, exports contained both outputs, and no
+  "queued" placeholders appeared during the re-run because the stale entries
+  already satisfied the view's done-stages check. Nothing downstream was worth
+  keeping in any case: it was derived from the output being replaced. The stage's
+  own output and everything after it is now dropped first, and a stale error
+  message no longer outlives the attempt that produced it.
+
 - **A slow first token no longer aborts the run at 120 seconds.** The idle timer
   raced every read including the first, and a server that sends response headers
   before it starts generating - llama.cpp's SSE does - spends the model load and

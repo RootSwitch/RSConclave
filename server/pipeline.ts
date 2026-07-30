@@ -19,6 +19,17 @@ export function resolveStageInput(entries: TranscriptEntry[], stageIndex: number
   return stripThink(prev.text);
 }
 
+/**
+ * The entries a re-run from `stageIndex` keeps: the input and every earlier
+ * stage. Anything from that stage on was derived from output being replaced.
+ *
+ * Lives here rather than inline in the engine so the rule has one definition
+ * and can be tested directly.
+ */
+export function entriesBeforeStage(entries: TranscriptEntry[], stageIndex: number): TranscriptEntry[] {
+  return entries.filter((e) => e.memberIndex === undefined || e.memberIndex < stageIndex);
+}
+
 export function renderStagePrompt(template: string, input: string): string {
   return template.includes('{{INPUT}}')
     // Function replacement, not a string: a string replacement makes
