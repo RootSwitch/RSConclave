@@ -1,0 +1,10 @@
+# Never bake prompts/transcripts or endpoint config into an image
+data/
+
+.git/
+dev/
+*.md
+RSConclave.cmd
+.gitignore
+.dockerignore
+*.tmp

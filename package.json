@@ -1,0 +1,23 @@
+{
+  "name": "rsconclave",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local web UI for sequential multi-model workflows (chat, council, roundtable, pipeline) against Ollama / llama.cpp servers",
+  "license": "Unlicense",
+  "//type": "There is deliberately no \"type\" field, and adding one breaks the app either way. \"module\" makes public/markdown.js and tools/charcheck.js fail, since both are CommonJS (markdown.js carries a module.exports shim so its pure half stays testable, and it must stay a classic script because the browser loads it with a plain <script> tag). \"commonjs\" is worse: it marks the package type as explicit, which disables Node's module detection, and every server/*.ts file then fails on its first import statement. Leaving it unset keeps .js as CommonJS and lets detection treat the type-stripped ESM .ts files correctly.",
+  "//warning": "Every script that runs a .ts file disables MODULE_TYPELESS_PACKAGE_JSON. Node emits it because no \"type\" is set, and the remedy it prints - add \"type\": \"module\" - is the one change confirmed to break this project (see //type). Suppressing a warning whose advice is wrong beats printing it on every run and hoping nobody follows it. The warning only appears at all because a package.json exists; there was none before.",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "dependencies": {},
+  "scripts": {
+    "start": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON server/main.ts",
+    "dev": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --watch server/main.ts",
+    "test": "npm run check && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"server/test/*.test.ts\"",
+    "check": "node tools/erasable-check.js && node tools/charcheck.js",
+    "erasable": "node tools/erasable-check.js",
+    "charcheck": "node tools/charcheck.js",
+    "mock": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON dev/mock-ollama.ts",
+    "screenshots": "bash tools/screenshots/run.sh"
+  }
+}

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RSConclave</title>
+  <meta name="theme-color" content="#262a33" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/style.css" />
+  <script src="/themes.js"></script>
+  <script>
+    /* Apply the saved palette before first paint so the app never flashes Classic. */
+    try { const s = localStorage.getItem('rsconclave.theme') || localStorage.getItem('conclave.theme'); if (s) applyTheme(s); } catch {}
+  </script>
+</head>
+<body>
+  <div id="topbar">
+    <button id="nav-drawer" class="mini" title="Menu" aria-label="Open menu">☰<span class="nav-label">Menu</span></button>
+    <span class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="none">
+          <rect x="1" y="1" width="6" height="6" rx="1.2" stroke="var(--se-logo-a)" stroke-width="1.6"/>
+          <rect x="9" y="9" width="6" height="6" rx="1.2" stroke="var(--se-logo-b)" stroke-width="1.6"/>
+          <path d="M7 4h3a2 2 0 0 1 2 2v3" stroke="var(--se-accent)" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <span class="brand-name">RSConclave</span>
+    </span>
+    <span class="badge">Chat · Council · Roundtable · Pipeline</span>
+    <span class="spacer"></span>
+    <span id="user-chip" class="hidden">
+      <span class="user-name badge"></span>
+      <button class="mini" title="Sign out of this browser" onclick="Auth.logout()">Sign out</button>
+    </span>
+    <label for="theme">Theme</label>
+    <select id="theme" aria-label="Colour theme"></select>
+  </div>
+
+  <div id="layout">
+    <div id="drawer-backdrop"></div>
+    <nav id="sidebar">
+      <button id="nav-chat" class="nav-btn">New Chat</button>
+      <button id="nav-council" class="nav-btn">New Council</button>
+      <button id="nav-roundtable" class="nav-btn">New Roundtable</button>
+      <button id="nav-pipeline" class="nav-btn">New Pipeline</button>
+      <span id="import-slot"></span>
+      <div id="status-strip" class="hidden">
+        <div id="status-phase"></div>
+        <div id="context-meter-wrap" class="hidden">
+          <div id="context-meter"><div id="context-meter-fill"></div></div>
+          <span id="context-meter-label"></span>
+        </div>
+      </div>
+      <h2>On the box</h2>
+      <div id="box-status"></div>
+      <h2>Sessions</h2>
+      <div id="tag-filter" class="row wrap"></div>
+      <input id="session-search" type="search" placeholder="Search transcripts…"
+             title="Searches titles, prompts, scenarios and every message in your sessions" />
+      <ul id="session-list"></ul>
+      <button id="nav-settings" class="nav-btn nav-bottom">Settings</button>
+    </nav>
+    <div id="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"
+         tabindex="0" title="Drag to resize. Double-click to reset."></div>
+    <main id="main">
+      <section id="view-chat" class="view hidden"></section>
+      <section id="view-council" class="view hidden"></section>
+      <section id="view-roundtable" class="view hidden"></section>
+      <section id="view-pipeline" class="view hidden"></section>
+      <section id="view-settings" class="view hidden"></section>
+    </main>
+  </div>
+
+  <script src="/api.js"></script>
+  <script src="/markdown.js"></script>
+  <script src="/auth.js"></script>
+  <script src="/chat.js"></script>
+  <script src="/council.js"></script>
+  <script src="/roundtable.js"></script>
+  <script src="/pipeline.js"></script>
+  <script src="/settings.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

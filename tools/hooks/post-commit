@@ -1,0 +1,12 @@
+#!/bin/sh
+# Refresh dist/rsconclave.bundle after every commit, so the transferable
+# artifact is never stale relative to the repo.
+#
+# This directory is wired in with:  git config core.hooksPath tools/hooks
+# (.git/hooks is not tracked, so a hook that lives there dies with the clone;
+# tools/install-hooks.sh runs the config line for you.)
+#
+# A failed bundle must never block or fail the commit itself - the commit is
+# the source of truth, the bundle is a convenience derived from it.
+"$(dirname "$0")/../make-bundle.sh" --quiet || echo "[bundle] refresh failed - run tools/make-bundle.sh by hand to see why"
+exit 0

@@ -1,0 +1,102 @@
+// Minimal method+path router with JSON body handling.
+import type { IncomingMessage, ServerResponse } from 'node:http';
+
+export type Handler = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  params: Record<string, string>,
+  query: URLSearchParams,
+) => Promise<void> | void;
+
+interface Route {
+  method: string;
+  segments: string[]; // ':name' segments are params
+  handler: Handler;
+}
+
+const routes: Route[] = [];
+
+export function route(method: string, pattern: string, handler: Handler): void {
+  routes.push({ method, segments: pattern.split('/').filter(Boolean), handler });
+}
+
+const MAX_BODY = 10 * 1024 * 1024;
+
+export function readJsonBody(req: IncomingMessage): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let tooLarge = false;
+    req.on('data', (c: Buffer) => {
+      if (tooLarge) return; // already rejected; drain and discard the rest
+      size += c.length;
+      if (size > MAX_BODY) {
+        tooLarge = true;
+        chunks.length = 0; // stop holding what we read
+        // Drain rather than destroy. Destroying here closed the socket before
+        // the 413 could be written, so the client saw a dropped connection
+        // instead of an error it could report.
+        req.resume();
+        reject(new HttpError(413, 'body too large'));
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(new Error('invalid JSON body'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+export function sendJson(res: ServerResponse, status: number, obj: unknown): void {
+  const body = JSON.stringify(obj);
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(body),
+  });
+  res.end(body);
+}
+
+export class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** Try to dispatch; returns false if no route matched. */
+export async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  const segs = url.pathname.split('/').filter(Boolean);
+  for (const r of routes) {
+    if (r.method !== req.method || r.segments.length !== segs.length) continue;
+    const params: Record<string, string> = {};
+    let ok = true;
+    for (let i = 0; i < segs.length; i++) {
+      const pat = r.segments[i];
+      if (pat.startsWith(':')) params[pat.slice(1)] = decodeURIComponent(segs[i]);
+      else if (pat !== segs[i]) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) continue;
+    try {
+      await r.handler(req, res, params, url.searchParams);
+    } catch (err: any) {
+      const status = err instanceof HttpError ? err.status : 500;
+      if (!res.headersSent) sendJson(res, status, { error: err?.message ?? 'internal error' });
+      else res.end();
+    }
+    return true;
+  }
+  return false;
+}

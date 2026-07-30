@@ -1,0 +1,12 @@
+{
+  "name": "RSConclave",
+  "short_name": "RSConclave",
+  "description": "Sequential multi-model orchestration for local LLMs",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#2d323d",
+  "theme_color": "#262a33",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

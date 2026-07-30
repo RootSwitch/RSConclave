@@ -1,0 +1,34 @@
+# Runtime state - NEVER commit.
+# data/sessions/*.json contain every prompt and model response verbatim,
+# and config.json holds your inference endpoint addresses.
+# store.ts recreates this directory on startup, so nothing is lost by ignoring it.
+data/
+
+# Atomic-write temp files (store.ts writes *.tmp then renames)
+*.tmp
+
+# Per-box compose settings written by tools/install.sh - holds ADMIN_PASSWORD
+docker-compose.override.yml
+
+# Derived transfer artifact (tools/make-bundle.sh); never history, only output
+dist/
+
+# Local hardware notes - contains this box's real addresses and measurements
+CONTEXT-SIZING.md
+
+# Local release planning; spent once the repo is public
+PUBLISH-CHECKLIST.md
+
+# Node (this project has zero dependencies; defensive only)
+node_modules/
+package-lock.json
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+
+# Agent scratch
+.claude/

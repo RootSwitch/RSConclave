@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- The topbar mark on a Classic-theme tile. Fixed colors on purpose: a
+       favicon renders outside the page, where the theme variables do not exist. -->
+  <rect width="64" height="64" rx="12" fill="#262a33"/>
+  <rect x="12" y="12" width="18" height="18" rx="3.5" fill="none" stroke="#4c8bf5" stroke-width="4.5"/>
+  <rect x="34" y="34" width="18" height="18" rx="3.5" fill="none" stroke="#2e9b57" stroke-width="4.5"/>
+  <path d="M30 21h9a6 6 0 0 1 6 6v9" fill="none" stroke="#4c8bf5" stroke-width="4.5" stroke-linecap="round"/>
+</svg>

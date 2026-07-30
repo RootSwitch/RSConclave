@@ -1,0 +1,81 @@
+# RSConclave on a lab server:
+#   docker compose up -d --build
+#
+# Sessions, personas, presets and endpoint config persist in the named volume.
+#
+# Accounts: the first visitor claims the instance on the setup page. On a
+# network where someone could beat you to that, pre-claim it by setting
+# ADMIN_PASSWORD in the environment (user "admin" is created on first boot):
+#   environment:
+#     - ADMIN_PASSWORD=change-me-please
+# Each account gets its own sessions, personas and presets under
+# data/users/<name>/. Lost every password? Delete users.json and
+# authsessions.json inside the volume - transcripts survive, accounts reset.
+#
+# HTTPS: run  ./tools/gen-cert.sh <hostname-or-ip>  once on the host (or drop
+# your own PEM pair at data/certs/server.crt + server.key), then
+# `docker compose restart`. The server switches to HTTPS automatically.
+
+# Pin the compose project name. Without this it defaults to the checkout
+# folder's name, which prefixes the real volume name - so cloning into
+# "RSConclave" instead of "rsconclave", or renaming the folder later, would
+# silently attach a fresh empty volume and leave your transcripts orphaned
+# under the old prefix. Pinned here, the volume is always
+# rsconclave_rsconclave-data no matter what the directory is called.
+name: rsconclave
+
+# Cap container logs so an unattended box cannot slowly fill its disk - Docker's
+# default json-file driver never rotates. 10 MB x 5 = 50 MB.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  rsconclave:
+    build: .
+    container_name: rsconclave
+    ports:
+      - "7777:7777"
+    volumes:
+      # A named volume rather than a bind mount, deliberately. Transcripts and
+      # accounts are the most personal data this app holds, and a named volume
+      # keeps them out of any other container's mount namespace: a directory
+      # traversal bug in a neighbouring container cannot walk to a path that
+      # was never mounted there. Sharing a parent directory between containers
+      # buys nothing here and would only widen the blast radius.
+      #
+      # If you would rather have the files sitting on the host - easier
+      # backups, easier grepping - swap this for `./data:/app/data` and take
+      # that trade knowingly.
+      #
+      # Resolves to rsconclave_rsconclave-data, fixed by the top-level `name`
+      # above rather than by whatever the checkout folder happens to be called.
+      - rsconclave-data:/app/data
+      # Certificates only, read-only, mounted over the same path inside the
+      # named volume. ,z relabels for SELinux hosts (Rocky/RHEL/Fedora); no-op
+      # elsewhere. tools/gen-cert.sh writes here by default.
+      - ./data/certs:/app/data/certs:ro,z
+    # Run an init (tini) as PID 1 so orphaned processes get reaped. Node does
+    # not reap children it did not spawn, and the HEALTHCHECK's wget leaves an
+    # ssl_client behind on every HTTPS probe. Those zombies still hold a slot
+    # against the nproc limit of the HOST uid the container runs as (1000), so
+    # after about a day that user cannot fork anything - including its own SSH
+    # sessions, which fail with "Server refused to start a shell/command".
+    # Costs nothing: Docker ships the init binary, no image rebuild needed.
+    init: true
+    logging: *default-logging
+    # Lets the container reach services on its own host by name, for running
+    # RSConclave directly ON the inference box: endpoint URL
+    # http://host.docker.internal:11434. Docker Desktop provides the name
+    # natively; on Linux this mapping is what makes it exist. The host's
+    # Ollama must listen beyond localhost (OLLAMA_HOST=0.0.0.0) - container
+    # traffic arrives on the docker bridge, not loopback, so a
+    # 127.0.0.1-bound Ollama will resolve and still refuse.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  rsconclave-data:
