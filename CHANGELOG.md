@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- **Every reasoning block folds away, not just the first one.** The pattern was
+  anchored at the start of the text and matched once, so a model that interleaves
+  thinking with content - which the provider normaliser legitimately produces -
+  had its second block rendered as literal `<think>` text in the middle of the
+  answer. Folds now sit where the thinking actually happened instead of being
+  hoisted to the top. Your own messages are left alone: searching them for
+  `<think>` anywhere would have hidden part of any message that merely mentions
+  the tag, which is a thing people using this app do.
+
+- **Clicking through sessions quickly no longer leaves the view and the sidebar
+  disagreeing.** Session opens had no ordering guard (the search box already had
+  one), so clicking A then B showed whichever response happened to land last -
+  A's transcript under B's highlight until the next click.
+
+- **Repointing an endpoint no longer reports the old box's context windows.**
+  Saving endpoints cleared the model list cache but not the context-window
+  cache, which was returned unconditionally - so after moving an endpoint from
+  one machine to another, every ctx tag kept showing the previous machine's
+  numbers until a full reload. Those numbers are exactly what people size
+  `num_ctx` from.
+
+- **The two identical-looking ✕ buttons in Settings now say what they do.**
+  Deleting an endpoint saves immediately and takes its model aliases with it, so
+  it asks first; removing a persona only edits local state until you press Save,
+  so its tooltip says so.
+
+- **`remove-entry` events are scoped to their session.** The handler matched on
+  entry id alone, so a reroll driven from one tab could strip entries out of a
+  different session open in another - reachable because forks used to share
+  entry ids with their source. Forks mint fresh ids now; this is the second
+  layer.
+
 - **A message that never got a reply is no longer a dead end.** When a turn
   failed before its reply entry existed - which is what happens when a saved
   session's endpoint has since been deleted in Settings - the transcript ended

@@ -21,22 +21,63 @@ function el(tag, attrs = {}, ...children) {
  * Render entry text with <think> blocks collapsed. Only used for COMPLETED
  * entries - streaming entries stay plain text so token appends keep working.
  */
-function renderEntryText(container, text) {
+function renderEntryText(container, text, entryKind) {
   container.replaceChildren();
   container.classList.remove('md');
-  const m = text.match(/^\s*<think>([\s\S]*?)(?:<\/think>\s*)([\s\S]*)$/);
-  const body = m ? m[2].trim() : text;
-  if (m) {
-    container.append(
-      el('details', { class: 'think' },
-        el('summary', {}, 'thinking…'),
-        el('div', { class: 'think-body' }, m[1].trim())),
-    );
+  /*
+   * A person's own words are never reasoning output, and searching them for
+   * "<think>" anywhere would fold away part of a message that merely mentions
+   * the tag - which people using this app have every reason to do.
+   */
+  if (entryKind === 'user') {
+    mdRender(container, text);
+    return;
   }
-  // Completed messages render as markdown (streaming ones stay plain text
-  // and get re-rendered here on the final entry event). Thinking stays
-  // plain inside its fold - it is scratch work, not a document.
-  mdRender(container, body);
+  /*
+   * EVERY think block, in place.
+   *
+   * The old pattern was anchored at the start and matched once, so a model that
+   * interleaves reasoning with content - which the provider normaliser
+   * legitimately produces - had its second block rendered as literal "<think>"
+   * text in the transcript. Safe (it is a text node) but it dumps reasoning into
+   * the middle of the answer with no delimiter.
+   *
+   * Walking the string keeps document order, so a fold sits where its thinking
+   * actually happened rather than being hoisted to the top.
+   */
+  const re = /<think>([\s\S]*?)(?:<\/think>|$)/g;
+  const parts = [];
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const before = text.slice(last, m.index);
+    if (before.trim()) parts.push({ prose: before });
+    if (m[1].trim()) parts.push({ think: m[1] });
+    last = m.index + m[0].length;
+    if (m[0].length === 0) break; // defensive: never spin on a zero-width match
+  }
+  if (!parts.length && last === 0) {
+    // No thinking at all, which is the common case - render the whole thing.
+    mdRender(container, text);
+    return;
+  }
+  const tail = text.slice(last);
+  if (tail.trim()) parts.push({ prose: tail });
+  for (const p of parts) {
+    if (p.think !== undefined) {
+      container.append(
+        el('details', { class: 'think' },
+          el('summary', {}, 'thinking…'),
+          el('div', { class: 'think-body' }, p.think.trim())),
+      );
+    } else {
+      // Thinking stays plain inside its fold - it is scratch work, not a
+      // document - so only prose goes through the markdown renderer.
+      const block = el('div', {});
+      mdRender(block, p.prose.trim());
+      container.append(block);
+    }
+  }
 }
 
 /**
@@ -681,8 +722,18 @@ function mountSessionView(session) {
   showView(name);
 }
 
+/*
+ * Sequence-guarded, the same way the search box is. Click session A then B
+ * quickly and whichever response lands LAST won - so a slow fetch for A could
+ * mount A's transcript while the sidebar highlighted B, and the two disagreed
+ * until the next click.
+ */
+let openSeq = 0;
 async function openSession(id) {
-  App.session = await Api.getSession(id);
+  const mySeq = ++openSeq;
+  const session = await Api.getSession(id);
+  if (mySeq !== openSeq) return; // a newer click already won
+  App.session = session;
   mountSessionView(App.session);
   renderSessionList();
 }
@@ -944,8 +995,12 @@ function connectSse() {
   });
 
   es.addEventListener('remove-entry', (ev) => {
-    const { entryId } = JSON.parse(ev.data);
-    if (App.session) {
+    const { entryId, sessionId } = JSON.parse(ev.data);
+    // Scoped by session. Filtering on the id alone meant a reroll driven from
+    // one tab could strip entries out of a DIFFERENT session open in another -
+    // forks used to share entry ids with their source, which made that
+    // reachable. Fork mints fresh ids now; this is the belt to that braces.
+    if (App.session && (!sessionId || App.session.id === sessionId)) {
       App.session.entries = App.session.entries.filter((e) => e.id !== entryId);
       currentViewRenderContent();
     }

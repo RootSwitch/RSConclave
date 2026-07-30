@@ -471,7 +471,7 @@ const Council = {
     }
 
     const body = el('div', { class: 'card-body', dataset: { entryBody: entry.id } });
-    if (complete) renderEntryText(body, entry.text);
+    if (complete) renderEntryText(body, entry.text, entry.kind);
     else body.textContent = entry.text;
 
     return el('div', { class: `card${isConsolidation ? ' consolidation' : ''}` },

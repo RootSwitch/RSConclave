@@ -732,7 +732,7 @@ export function rerollLast(username: string): { restored?: { participantId: stri
   // was already gone from disk - reroll after an inject silently diverged.
   const removed = entries.splice(idx);
   persist();
-  for (const e of removed) broadcast('remove-entry', { entryId: e.id }, a.owner);
+  for (const e of removed) broadcast('remove-entry', { entryId: e.id, sessionId: a.session.id }, a.owner);
   a.autoRemaining = 0;
   /*
    * A human seat has nothing to re-generate: roundtableLoop stops as soon as the
@@ -822,7 +822,7 @@ export function chatRegenerate(username: string): void {
   }
   const removed = entries.splice(entries.length - 1);
   persist();
-  for (const e of removed) broadcast('remove-entry', { entryId: e.id }, a.owner);
+  for (const e of removed) broadcast('remove-entry', { entryId: e.id, sessionId: a.session.id }, a.owner);
   launch(runChatTurn);
 }
 

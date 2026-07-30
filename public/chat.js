@@ -192,7 +192,7 @@ const Chat = {
         const mine = e.kind === 'user';
         const complete = entryComplete(e, generating && e === session.entries.at(-1));
         const textEl = el('div', { class: 'text', dataset: { entryBody: e.id } });
-        if (complete && e.text) renderEntryText(textEl, e.text);
+        if (complete && e.text) renderEntryText(textEl, e.text, e.kind);
         else textEl.textContent = e.text;
 
         const footer = [];

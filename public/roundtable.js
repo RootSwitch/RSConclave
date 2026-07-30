@@ -385,7 +385,7 @@ const Roundtable = {
         const cls = `bubble${neutral ? ' neutral' : ''}${e.kind === 'error' ? ' error' : ''}${consolidation ? ' consolidation' : ''}`;
 
         const textEl = el('div', { class: 'text', dataset: { entryBody: e.id } });
-        if (complete && e.text) renderEntryText(textEl, e.text);
+        if (complete && e.text) renderEntryText(textEl, e.text, e.kind);
         else textEl.textContent = e.text;
 
         const statsRow = [];

@@ -160,7 +160,12 @@ const Settings = {
           testResult.textContent = '✗ ' + err.message;
         }
       } }, 'Test');
-      const delBtn = el('button', { class: 'danger', onclick: () => {
+      // Confirmed, because this one persists immediately - and it takes the
+      // endpoint's aliases with it. The persona ✕ beside it looks identical but
+      // only edits local state, so a mis-click here used to be the expensive one.
+      const delBtn = el('button', { class: 'danger', title: 'Delete this endpoint (saves immediately)', onclick: () => {
+        const name = els.name.value.trim() || 'this endpoint';
+        if (!confirm(`Delete ${name}?\n\nSaved straight away, along with any model aliases on it.`)) return;
         rows.splice(rows.indexOf(rowObj), 1);
         row.remove();
         save().catch((e) => alert(e.message));
@@ -192,6 +197,11 @@ const Settings = {
       await Api.putConfig({ endpoints });
       App.config.endpoints = endpoints;
       App.modelsByEndpoint = {};
+      // The context-window cache has to go too. It was keyed by endpoint id and
+      // returned unconditionally, so repointing an endpoint from one box to
+      // another kept showing the OLD box's numbers until a full reload - and
+      // those numbers are what people size num_ctx from.
+      App.modelInfoByEndpoint = {};
     };
 
     for (const ep of App.config.endpoints) addRow(ep);
@@ -245,7 +255,9 @@ const Settings = {
       els.prompt.addEventListener('input', syncSummary);
       syncSummary();
 
-      const delBtn = el('button', { class: 'danger mini', title: 'Remove this persona', onclick: (ev) => {
+      // Unsaved, unlike the endpoint ✕ - so the title says so rather than
+      // leaving two identical buttons with opposite consequences.
+      const delBtn = el('button', { class: 'danger mini', title: 'Remove this persona (press Save to keep the change)', onclick: (ev) => {
         // inside a summary: without both, the click also toggles the fold
         ev.preventDefault();
         ev.stopPropagation();
