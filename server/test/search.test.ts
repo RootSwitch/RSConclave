@@ -25,6 +25,18 @@ test('search: matches transcript text, case-insensitively, with speaker and snip
   assert.ok(r[0].hits[0].snippet.includes('TIDAL power'));
 });
 
+test('search: matches tags', () => {
+  // Tags render in the sidebar and drive its filter chips; searching for one
+  // that appears nowhere else must still find the session.
+  const r = searchSessions([
+    session({ id: 'tagged', title: 'Untitled', tags: ['paccourt', 'demo'] }),
+    session({ id: 'untagged', title: 'Also untitled' }),
+  ], 'paccourt');
+  assert.equal(r.length, 1);
+  assert.equal(r[0].id, 'tagged');
+  assert.equal(r[0].hits[0].speaker, 'tags');
+});
+
 test('search: matches titles and setup text', () => {
   const r = searchSessions([
     session({ id: 'byTitle', title: 'Dragon campaign' }),

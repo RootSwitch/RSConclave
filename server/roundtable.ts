@@ -101,7 +101,13 @@ function pushMerged(list: ChatMessage[], role: 'user' | 'assistant', text: strin
 
 /** Strip a self-prefixed "Name:" / "[Name]:" the model may add despite instructions. */
 export function stripSelfPrefix(name: string, text: string): string {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Match the CORE of the name with brackets optional around it. For a seat
+  // literally named "[Bot]" the old pattern already stripped "[Bot]:" (the
+  // optional \[? matched empty) - what slipped through was the model writing
+  // the de-bracketed "Bot:". So the name's own brackets come off first, and
+  // the optional ones around the pattern cover both spellings.
+  const core = name.replace(/^\[+|\]+$/g, '') || name;
+  const escaped = core.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return text.replace(new RegExp(`^\\s*\\[?${escaped}\\]?\\s*:\\s*`, 'i'), '');
 }
 

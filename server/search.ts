@@ -63,6 +63,7 @@ export function searchSessions(sessions: Session[], query: string): SearchResult
       if (hits.length < HITS_PER_SESSION) hits.push({ speaker, snippet: snippet(text, idx, q.length) });
     };
     consider('title', s.title);
+    if (s.tags?.length) consider('tags', s.tags.join(' '));
     consider('setup', configText(s.config));
     for (const e of s.entries) consider(e.speaker, e.text);
     if (total > 0) {

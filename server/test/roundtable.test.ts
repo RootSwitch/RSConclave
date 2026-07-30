@@ -111,3 +111,14 @@ test('stripSelfPrefix: removes name prefixes, keeps clean text', () => {
   assert.equal(stripSelfPrefix('Alice', 'hello Alice: yes'), 'hello Alice: yes');
   assert.equal(stripSelfPrefix('DM (Dave)', 'DM (Dave): roll initiative'), 'roll initiative');
 });
+
+test('stripSelfPrefix: a seat named with brackets strips both spellings', () => {
+  // "[Bot]:" always stripped (the optional bracket matched empty around the
+  // escaped name); the de-bracketed "Bot:" is the case that used to survive.
+  assert.equal(stripSelfPrefix('[Bot]', '[Bot]: reply'), 'reply');
+  assert.equal(stripSelfPrefix('[Bot]', 'Bot: reply'), 'reply');
+  // regex metacharacters in names still match literally
+  assert.equal(stripSelfPrefix('C++', 'C++: reply'), 'reply');
+  // a name that is nothing but brackets falls back to itself
+  assert.equal(stripSelfPrefix('[]', '[]: reply'), 'reply');
+});

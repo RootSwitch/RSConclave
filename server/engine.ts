@@ -142,6 +142,18 @@ function pushState(): void {
  * lost, leaving an empty bubble on disk that the live browser did not show.
  */
 function persistOf(a: Active): void {
+  // A run that already lost the active slot (Stop, then its aborted turn
+  // unwinding) still writes through here to save partial output. Anything the
+  // user changed ON DISK in that instant must survive: a rename or retag goes
+  // straight to the file when the session is not live, and this stale
+  // in-memory copy would silently revert it.
+  if (active !== a) {
+    const disk = store.loadSession<Session>(a.owner, a.session.id);
+    if (disk) {
+      a.session.title = disk.title;
+      a.session.tags = disk.tags;
+    }
+  }
   a.session.updatedAt = new Date().toISOString();
   store.saveSession(a.owner, a.session);
 }
@@ -225,7 +237,7 @@ function takeover(username: string): void {
 }
 
 /** Stream one model turn into a new transcript entry. Returns the entry. */
-async function runTurn(opts: {
+async function runTurn(a: Active, opts: {
   member: CouncilMember;
   messages: Parameters<typeof streamChat>[0]['messages'];
   entrySeed: Omit<TranscriptEntry, 'id' | 'ts' | 'text'>;
@@ -237,7 +249,6 @@ async function runTurn(opts: {
    */
   appendTo?: TranscriptEntry;
 }): Promise<TranscriptEntry> {
-  const a = active!;
   const ep = endpointById(opts.member.endpointId, a.session);
   const params = { ...opts.member.params };
   if (opts.keepAlive !== undefined) params.keep_alive = opts.keepAlive;
@@ -345,9 +356,9 @@ async function runCouncil(): Promise<void> {
   const a = active!;
   const config = a.session.config as CouncilConfig;
   for (let i = 0; i < config.members.length; i++) {
-    if (!active || a.pauseRequested) break;
+    if (active !== a || a.pauseRequested) break;
     const m = config.members[i];
-    const entry = await runTurn({
+    const entry = await runTurn(a, {
       member: m,
       messages: council.buildMemberHistory(a.session.entries, i, config.ballot),
       entrySeed: { kind: 'participant', speaker: m.model, model: m.model, memberIndex: i },
@@ -363,12 +374,11 @@ async function runCouncil(): Promise<void> {
       break;
     }
   }
-  if (active && !a.pauseRequested) await runConsolidation();
-  finishRun();
+  if (active === a && !a.pauseRequested) await runConsolidation(a);
+  finishRun(a);
 }
 
-async function runConsolidation(template?: string): Promise<void> {
-  const a = active!;
+async function runConsolidation(a: Active, template?: string): Promise<void> {
   const config = a.session.config as CouncilConfig;
   const prompt = council.buildConsolidatorPrompt(
     config,
@@ -376,7 +386,7 @@ async function runConsolidation(template?: string): Promise<void> {
     template,
     council.joinedPrompts(a.session.entries),
   );
-  await runTurn({
+  await runTurn(a, {
     member: config.consolidator,
     messages: [{ role: 'user', content: prompt }],
     entrySeed: {
@@ -388,11 +398,21 @@ async function runConsolidation(template?: string): Promise<void> {
   });
 }
 
-function finishRun(): void {
-  if (!active) return;
-  active.phase = 'done';
-  active.session.status = 'done';
-  persist();
+/*
+ * Complete a specific run - and only if it is still the live one.
+ *
+ * This used to read the GLOBAL active, and every caller reaches it across an
+ * await: stop a council mid-stream and start a chat before the aborted turn
+ * finishes unwinding, and the council's finishRun() marked the brand-new chat
+ * as done. Reproduced deterministically (stopRun + startChat in one tick),
+ * then fixed by addressing the run and refusing when it has been displaced -
+ * a displaced run's final status was already written by whoever displaced it.
+ */
+function finishRun(a: Active): void {
+  if (active !== a) return;
+  a.phase = 'done';
+  a.session.status = 'done';
+  persistOf(a);
   pushState();
 }
 
@@ -403,13 +423,13 @@ export function rerunMember(username: string, sessionId: string, memberIndex: nu
   const m = config.members[memberIndex];
   if (!m) throw new Error(`no member at index ${memberIndex}`);
   launch(async () => {
-    await runTurn({
+    await runTurn(a, {
       member: m,
       messages: council.buildMemberHistory(a.session.entries, memberIndex, config.ballot),
       entrySeed: { kind: 'participant', speaker: m.model, model: m.model, memberIndex },
       keepAlive: config.unloadBetweenModels ? '0' : undefined,
     });
-    finishRun();
+    finishRun(a);
   });
 }
 
@@ -427,8 +447,8 @@ export function consolidate(username: string, sessionId: string, template?: stri
     config.consolidator.params = member.params;
   }
   launch(async () => {
-    await runConsolidation(template);
-    finishRun();
+    await runConsolidation(a, template);
+    finishRun(a);
   });
 }
 
@@ -537,7 +557,7 @@ async function roundtableLoop(firstParticipantId?: string): Promise<void> {
       break;
     }
     const messages = rt.buildMessages(p, config, a.session.entries, getPersonas(a.owner));
-    const entry = await runTurn({
+    const entry = await runTurn(a, {
       member: { endpointId: p.endpointId, model: p.model, params: p.params },
       messages,
       entrySeed: { kind: 'participant', speaker: p.name, participantId: p.id, model: p.model },
@@ -552,8 +572,10 @@ async function roundtableLoop(firstParticipantId?: string): Promise<void> {
       break;
     }
     if (a.autoRemaining > 0) a.autoRemaining--;
-  } while (active && a.autoRemaining > 0 && !a.pauseRequested);
-  if (active) {
+  } while (active === a && a.autoRemaining > 0 && !a.pauseRequested);
+  // Only touch state that is still ours: after a Stop, `a` is orphaned and the
+  // slot may already belong to a different session.
+  if (active === a) {
     a.phase = a.session.status === 'active' ? 'awaiting_gate' : 'done';
     pushState();
   }
@@ -588,13 +610,13 @@ export function consolidateRoundtable(
     ? template.replaceAll('{{TRANSCRIPT}}', transcript)
     : `${template.trim()}\n\nTRANSCRIPT:\n${transcript}`;
   launch(async () => {
-    await runTurn({
+    await runTurn(a, {
       member,
       messages: [{ role: 'user', content: prompt }],
       entrySeed: { kind: 'consolidation', speaker: member.model, model: member.model },
     });
-    if (active) {
-      active.phase = 'awaiting_gate'; // conversation can continue after judging
+    if (active === a) {
+      a.phase = 'awaiting_gate'; // conversation can continue after judging
       pushState();
     }
   });
@@ -694,12 +716,12 @@ async function runChatTurn(): Promise<void> {
   const a = active!;
   const config = a.session.config as ChatConfig;
   const messages = chat.buildChatMessages(config, a.session.entries, getPersonas(a.owner));
-  await runTurn({
+  await runTurn(a, {
     member: { endpointId: config.endpointId, model: config.model, params: config.params },
     messages,
     entrySeed: { kind: 'participant', speaker: config.model, model: config.model },
   });
-  if (active) {
+  if (active === a) {
     a.phase = 'awaiting_gate';
     pushState();
   }
@@ -741,7 +763,7 @@ async function runPipeline(fromStage: number): Promise<void> {
   const a = active!;
   const config = a.session.config as PipelineConfig;
   for (let i = fromStage; i < config.stages.length; i++) {
-    if (!active || a.pauseRequested) break;
+    if (active !== a || a.pauseRequested) break;
     const stage = config.stages[i];
     let input: string;
     try {
@@ -750,7 +772,7 @@ async function runPipeline(fromStage: number): Promise<void> {
       a.lastError = err?.message ?? String(err);
       break;
     }
-    const entry = await runTurn({
+    const entry = await runTurn(a, {
       member: { endpointId: stage.endpointId, model: stage.model, params: stage.params },
       messages: [{ role: 'user', content: pipeline.renderStagePrompt(stage.template, input) }],
       entrySeed: {
@@ -762,7 +784,7 @@ async function runPipeline(fromStage: number): Promise<void> {
     });
     if (entry.kind === 'error' || entry.error) break; // downstream stages have no input
   }
-  finishRun();
+  finishRun(a);
 }
 
 /** Re-run from a given stage onward (using the existing output of the stage before it). */
@@ -853,13 +875,13 @@ export function chatContinue(username: string): void {
         'Continue from exactly where you stopped, in the same voice. Do not repeat ' +
         'anything you have already written and do not start over.',
     });
-    await runTurn({
+    await runTurn(a, {
       member: { endpointId: config.endpointId, model: config.model, params: config.params },
       messages,
       entrySeed: { kind: 'participant', speaker: config.model, model: config.model },
       appendTo: last,
     });
-    if (active) {
+    if (active === a) {
       a.phase = 'awaiting_gate';
       pushState();
     }

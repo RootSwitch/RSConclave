@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+- **A stopped run can no longer mark its replacement as finished.** The
+  independent review's one high finding, and it survived verification. Every
+  run's tail code - `finishRun()`, the "back to the gate" blocks after a turn
+  - read the GLOBAL active-run pointer, and every caller reaches that code
+  across an await. Stop a council mid-stream and start a chat before the
+  aborted turn finishes unwinding, and the dying council's `finishRun()`
+  marked the brand-new chat as done. Over HTTP the window is milliseconds
+  (the probe could not force it end to end), but calling stop and start in
+  the same tick reproduces it every time, and the stop-and-start confirm
+  makes the sequence a normal user action. Fixed by threading the run through
+  `runTurn`, `runConsolidation` and `finishRun` and refusing to touch state
+  once `active` is no longer that run - a displaced run's final status was
+  already written by whoever displaced it. The judge tail in
+  `consolidateRoundtable` was mutating the global directly; same fix. The
+  run-control probe gained the stop-then-start race as a permanent check.
+
+- **A rename in the instant after Stop is no longer silently reverted.** The
+  aborted turn's unwind saves its partial output by writing the whole session
+  from memory - and a rename or retag issued in that same instant goes to
+  disk, because the session is no longer the live run. The stale in-memory
+  copy then overwrote it. `persistOf` now re-reads title and tags from disk
+  when the run it is saving has lost the active slot. (The review described
+  a related race here; the mechanism it named cannot occur - the engine holds
+  no session references besides the active run, and the check-and-write is
+  synchronous - but chasing it surfaced this real, narrower window.)
+
+- **Searching for a tag now finds the session.** Tags rendered in the sidebar
+  and drove its filter chips, but the transcript search never looked at them -
+  a tag that appeared nowhere else in the text returned nothing.
+
+- **A seat named with brackets strips both spellings of its self-prefix.**
+  "[Bot]:" was always stripped; the de-bracketed "Bot:" survived. The name's
+  own brackets now come off before the optional ones around the pattern, so
+  both forms strip. (The review's mechanism was off - it claimed the bracketed
+  form required doubled brackets, which the optional matcher never did - but
+  the residual case it pointed at was real.)
+
 - **Standing up the inference box is now one command, context sizing
   included.** `tools/install-ollama.sh` is the companion to `install.sh`: that
   one deploys RSConclave, this one prepares the box it talks to. It detects

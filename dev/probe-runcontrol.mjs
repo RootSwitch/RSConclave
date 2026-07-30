@@ -131,6 +131,33 @@ console.log('  sessions marked active:',
   all.filter((s) => s.status === 'active').map((s) => `${s.mode}`).join(', ') || '(none)');
 check('exactly one session claims active', all.filter((s) => s.status === 'active').length === 1);
 
+// ---------- EXPERIMENT 5: stop mid-run, immediately start another session ----------
+// This is exactly the sequence the UI's stop-and-start confirm produces. The
+// dying run's tail code must not touch the session that took its place.
+console.log('\n=== 5. Stop a council mid-generation, instantly start a chat ===');
+const co2 = await api('POST', '/api/council/start', {
+  prompt: 'probe two',
+  members: [
+    { endpointId: EP, model: 'mock-jester:7b' },
+    { endpointId: EP, model: 'mock-jester:7b' },
+  ],
+  consolidator: { endpointId: EP, model: 'mock-jester:7b', template: '{{RESPONSES}}' },
+});
+await sleep(2500);                       // member 1 is mid-stream
+await api('POST', '/api/run/stop', {});
+const ch2 = await api('POST', '/api/chat/start', { endpointId: EP, model: 'mock-jester:7b' });
+console.log('  -> stopped council', co2.sessionId, 'and started chat', ch2.sessionId, 'in the same instant');
+await sleep(5000);                       // the aborted council turn unwinds NOW
+const st5 = await api('GET', '/api/state');
+const all5 = await api('GET', '/api/sessions');
+const chat5 = all5.find((s) => s.id === ch2.sessionId);
+const council5 = all5.find((s) => s.id === co2.sessionId);
+console.log('  chat phase after unwind   :', st5.phase);
+console.log('  chat status after unwind  :', chat5?.status);
+console.log('  council status            :', council5?.status);
+check('the dying council did not finish the new chat', st5.phase !== 'done' && chat5?.status !== 'done');
+check('the stopped council stays stopped', council5?.status === 'stopped');
+
 console.log('');
 console.log(failures ? `${failures} check(s) FAILED` : 'all checks passed');
 process.exit(failures ? 1 : 0);
