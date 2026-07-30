@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0 - 2026-07-30
+
+First public release. Everything below is the work that got it here, newest
+first - it reads as a development log rather than a release note, which is
+deliberate: the reasoning behind a decision is the part worth keeping, and most
+entries exist because something was wrong in a way worth remembering.
+
 - **Pipeline "Re-run from here" now discards what it said it would.** The button
   has always promised to discard this and later outputs, but the server only
   appended - so after a re-run the view showed two cards for every stage from
