@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **The roundtable stopped implying it was a tabletop tool.** Every example in
+  the setup form pointed the same way: the seat name suggested "DM", the role
+  overlay suggested "You are the Dungeon Master", and the scenario field asked
+  for "world context". Any one of those is fine; all three together quietly
+  answered the question "what is this for?" before the user got to ask it.
+  The name field now states what it actually does (blank uses the model name),
+  the overlay and scenario examples are drawn from other domains, and a
+  collapsed "Ideas" fold lists eight things people use a roundtable for -
+  debate with a verdict, adversarial code review, pre-mortems, rehearsing a
+  hard conversation, interview practice, editorial passes, Socratic tutoring,
+  and tabletop sessions, which is still there, just no longer the only answer.
+
+  Collapsed by default because the roundtable setup is already the longest
+  screen in the app: it costs 38px on a phone until someone opens it. The
+  README's "good for" list was widened to match.
+
+  The Dungeon Master persona stays. One themed example among six is flavour;
+  it was the form asking for the same theme three times that was the problem.
+
 - **Fork a session from any message.** Reroll and "re-run from here" both destroy
   what was there, which is the wrong tool when a roundtable takes an
   interesting wrong turn - you want to try the other path without losing this
@@ -373,7 +392,8 @@
   inline code and fences, lists, rules and - the big one for model output -
   tables now render instead of showing their syntax. A translation table
   also maps the LaTeX symbol tokens some models sprinkle into prose
-  (Gemma especially), so "$ightarrow$" reads as an arrow instead of TeX
+  (Gemma especially), so "$
+ightarrow$" reads as an arrow instead of TeX
   source. The renderer is ~150 lines, zero-dependency, and builds DOM
   nodes only - model output never passes through innerHTML, so markup in a
   reply stays literal text. Streaming messages stay plain text and are

@@ -146,7 +146,10 @@ const Roundtable = {
 
   buildSetup() {
     this.parts = [];
-    this.scenarioEl = el('textarea', { rows: 4, placeholder: 'Shared scenario / world context given to every participant…' });
+    this.scenarioEl = el('textarea', {
+      rows: 4,
+      placeholder: 'The situation every participant is given: what is being decided, argued or played out, and anything they all already know…',
+    });
     this.keepLastEl = el('input', { type: 'number', min: '0', placeholder: 'all' });
     this.errEl = el('div', { class: 'error-text' });
     const rowsWrap = el('div', { class: 'col' });
@@ -172,6 +175,33 @@ const Roundtable = {
       el('button', { onclick: () => this.addPartRow(rowsWrap) }, '+ add participant'),
       el('label', {}, 'Scenario'),
       this.scenarioEl,
+      /*
+       * Collapsed by default so it costs nothing on a phone, where the setup
+       * form is already the longest screen in the app. It exists because every
+       * example in this form used to be a tabletop one, which quietly suggested
+       * that was the only thing a roundtable was for.
+       */
+      el('details', { class: 'ideas' },
+        el('summary', {}, 'Ideas - what people use a roundtable for'),
+        el('ul', { class: 'idea-list' },
+          el('li', {}, el('b', {}, 'Debate with a verdict. '),
+            'Two opposed seats (the Skeptic and Advocate personas are a matched pair), then Run judge over the transcript.'),
+          el('li', {}, el('b', {}, 'Adversarial code review. '),
+            'One seat defends the change, one hunts for the input that breaks it.'),
+          el('li', {}, el('b', {}, 'Pre-mortem. '),
+            'An optimist, a pessimist and a realist on the same plan, before you commit to it.'),
+          el('li', {}, el('b', {}, 'Rehearse a hard conversation. '),
+            'Take a seat yourself, give the other side a persona, and try the opening three ways.'),
+          el('li', {}, el('b', {}, 'Interview practice. '),
+            'An interviewer, you as the candidate, and a third seat scoring the answers.'),
+          el('li', {}, el('b', {}, 'Editorial pass. '),
+            'Writer, line editor and fact-checker taking turns on the same draft.'),
+          el('li', {}, el('b', {}, 'Socratic tutoring. '),
+            'A tutor allowed only to ask questions, and a student seat that has to answer.'),
+          el('li', {}, el('b', {}, 'Tabletop session. '),
+            'A DM seat plus a player character each, human-gated so you approve every turn.'),
+        ),
+      ),
       el('div', { class: 'row' },
         el('label', {}, 'Keep last N entries in context (blank = all)'),
         this.keepLastEl,
@@ -199,14 +229,21 @@ const Roundtable = {
     const color = preset?.color ?? RT_COLORS[this.parts.length % RT_COLORS.length];
     const els = {
       color: el('input', { type: 'color', value: color }),
-      name: el('input', { placeholder: 'Name (e.g. DM)', value: preset?.name ?? '' }),
+      name: el('input', {
+        placeholder: 'Name (blank = the model)',
+        title: 'What this seat is called in the transcript. Left blank it uses the model name, so a name is only worth typing when the role matters more than the engine.',
+        value: preset?.name ?? '',
+      }),
       endpoint: el('select', {}),
       model: el('select', {}),
       persona: el('select', {}, el('option', { value: '' }, ' - persona - '),
         ...App.personas.map((p) => el('option', { value: p.id }, p.name))),
       temp: el('input', { type: 'number', step: '0.1', min: '0', max: '2', placeholder: 'temp' }),
       ctx: ctxInput(preset?.params?.num_ctx),
-      overlay: el('textarea', { rows: 2, placeholder: 'Role overlay (added after persona), e.g. "You are the Dungeon Master…"' }),
+      overlay: el('textarea', {
+        rows: 2,
+        placeholder: 'Role overlay, added after the persona. e.g. "You are the defence" or "You are the CFO and you care about payback period"',
+      }),
     };
     if (preset?.personaId) els.persona.value = preset.personaId;
     if (preset?.overlayPrompt) els.overlay.value = preset.overlayPrompt;

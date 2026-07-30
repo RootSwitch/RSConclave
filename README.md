@@ -41,7 +41,8 @@ is vanilla HTML/JS/CSS, and there is no build step.
   reasons they gave are useful for different things.
 - **Roundtable** - 2+ participants (each = model + persona + role overlay) take turns in one
   shared conversation, human-gated: Step, Auto xN, Pause, Reroll, inject as Narrator/User, Stop.
-  Good for DND campaigns, debates, adversarial code review. A participant can also be
+  Good for debate-with-a-verdict, adversarial code review, pre-mortems, rehearsing a hard
+  conversation, interview practice, and tabletop sessions. A participant can also be
   **you** (pick the human seat instead of an endpoint) - the gate bar gives you a speak box on
   your turn. Any conversation can be **judged/consolidated**: run a model over the whole
   transcript with a verdict template ("Judge / consolidate this conversation" in the header).

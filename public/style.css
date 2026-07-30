@@ -107,6 +107,13 @@ body.resizing-sidebar #sidebar-resize {
 /* Kill text selection while dragging, or the pointer paints the transcript blue. */
 body.resizing-sidebar { user-select: none; cursor: col-resize; }
 
+/* The roundtable "ideas" fold: a dense list, so it stays readable on a phone
+   without the list markers eating the indent. */
+.ideas summary { color: var(--se-accent); }
+.idea-list { margin: 0; padding-left: 18px; font-size: 12px; color: var(--se-txt-dim); }
+.idea-list li { margin-bottom: 5px; }
+.idea-list b { color: var(--se-txt); font-weight: 600; }
+
 .nav-btn { width: 100%; text-align: left; }
 
 /* Council ballot tally: label, proportional bar, count, who voted. */
