@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **Login rate limiting now constrains concurrent attackers, not just patient
+  ones.** The check ran up front but the counter only incremented after the body
+  read and the awaited scrypt, so sixty simultaneous attempts all passed the
+  check before any of them recorded a failure: sixty passwords tried, zero 429s,
+  and the guess rate scaled with the attacker's socket count. Counting at the
+  start of the attempt closes it - sixty concurrent attempts now give five 401s
+  and fifty-five 429s. A correct password still clears the counter, so mistyping
+  twice and then getting it right costs nothing.
+
+- **The public routes no longer buffer 10 MB before looking at it.** One cap
+  covered everything, including unauthenticated login and setup, each of which
+  then handed the result to scrypt - a couple of hundred concurrent requests
+  meant gigabytes held and every other filesystem and crypto job queued behind
+  the scrypt runs. Credentials get 4 KB, most routes 1 MB, session import (the
+  one route that carries a real document) keeps 10 MB. An oversize body is
+  refused on its declared `content-length` before a byte is read, and a chunked
+  body that keeps streaming after its 413 is now hung up on instead of drained
+  forever.
+
+- **Assorted hardening from the same review.** A bogus-token logout rewrote
+  `authsessions.json` every time, because `delete` returns true for a key that
+  was never there. The login timing pad was built lazily, so the first
+  unknown-user login after each restart paid two scrypt runs instead of one -
+  a measurable "no such user" exactly where the pad exists to hide it. Cookie
+  `Max-Age` was fixed at login while the server slid the session's expiry, so
+  someone using the app daily was bounced to the login page on day 30 with a
+  valid session; the cookie is re-issued on each authenticated request.
+  `/events` had no connection cap, and every token of every run iterates the
+  client set. `PUT /api/presets` stored whatever it was given, so `null` broke
+  that account's preset UI on every load. The login form had no in-flight guard
+  (two quick Enters ran setup twice) and its focus ternary picked the same field
+  either way.
+
 - **Bad requests answer 400/404/409 instead of 500.** "Pick an endpoint and
   model", "that username already exists" and "session not found" all came back
   as 500, which says the server is broken and retrying might help - so a typo in

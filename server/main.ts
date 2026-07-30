@@ -5,7 +5,7 @@ import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { dispatch, readJsonBody, route, sendJson, HttpError } from './router.ts';
+import { BIG_BODY, dispatch, readJsonBody, route, sendJson, HttpError, SMALL_BODY } from './router.ts';
 import { serveStatic } from './static.ts';
 import { handleSse, onConnectSnapshot } from './sse.ts';
 import { discoverModels, getModelInfo } from './providers.ts';
@@ -75,7 +75,7 @@ route('GET', '/api/session', (req, res) => {
 
 route('POST', '/api/setup', async (req, res) => {
   if (auth.anyUsers()) throw new HttpError(409, 'already configured');
-  const body = await readJsonBody(req);
+  const body = await readJsonBody(req, SMALL_BODY);
   if (!body.password || String(body.password).length < 8) {
     throw new HttpError(400, 'Password must be at least 8 characters.');
   }
@@ -91,11 +91,12 @@ route('POST', '/api/setup', async (req, res) => {
 
 route('POST', '/api/login', async (req, res) => {
   const ip = clientIp(req);
-  if (!auth.loginAllowed(ip)) throw new HttpError(429, 'Too many attempts - wait a minute.');
-  const body = await readJsonBody(req);
+  // Counted before the body read and the scrypt, so concurrent attempts cannot
+  // outrun the limit - see noteLoginAttempt.
+  if (!auth.noteLoginAttempt(ip)) throw new HttpError(429, 'Too many attempts - wait a minute.');
+  const body = await readJsonBody(req, SMALL_BODY);
   const name = await auth.checkLogin(body.username, body.password);
   if (!name) {
-    auth.recordLoginFailure(ip);
     throw new HttpError(401, 'Wrong username or password.');
   }
   auth.recordLoginSuccess(ip);
@@ -111,7 +112,7 @@ route('POST', '/api/logout', (req, res) => {
 
 route('POST', '/api/password', async (req, res) => {
   const me = userOf(req);
-  const body = await readJsonBody(req);
+  const body = await readJsonBody(req, SMALL_BODY); // credentials, and it runs scrypt
   if (!(await auth.checkLogin(me, String(body.current ?? '')))) {
     throw new HttpError(401, 'Current password is wrong.');
   }
@@ -131,7 +132,7 @@ route('GET', '/api/users', (req, res) => {
 });
 route('POST', '/api/users', async (req, res) => {
   userOf(req);
-  const body = await readJsonBody(req);
+  const body = await readJsonBody(req, SMALL_BODY); // credentials, and it runs scrypt
   if (!body.password || String(body.password).length < 8) {
     throw new HttpError(400, 'Password must be at least 8 characters.');
   }
@@ -226,6 +227,11 @@ route('GET', '/api/presets', (req, res) => {
 route('PUT', '/api/presets', async (req, res) => {
   const me = userOf(req);
   const body = await readJsonBody(req);
+  // Personas already validated their shape; presets did not, so PUT null was
+  // stored happily and then broke that account's preset UI on every load.
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new HttpError(400, 'expected an object of preset lists');
+  }
   store.saveUser(me, 'presets', body);
   sendJson(res, 200, { ok: true });
 });
@@ -356,7 +362,8 @@ route('POST', '/api/sessions/:id/fork', async (req, res, params) => {
  */
 route('POST', '/api/sessions/import', async (req, res) => {
   const me = userOf(req);
-  const raw = await readJsonBody(req);
+  // The one route whose payload is legitimately a large document.
+  const raw = await readJsonBody(req, BIG_BODY);
   const modes = ['council', 'roundtable', 'pipeline', 'chat'];
   if (!raw || typeof raw !== 'object') throw new HttpError(400, 'expected a session object');
   if (!modes.includes(raw.mode)) throw new HttpError(400, 'unrecognised session mode');
@@ -628,12 +635,21 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       return;
     }
     if (!PUBLIC_API.has(path)) {
-      const user = auth.validateSession(auth.tokenFromRequest(req));
+      const token = auth.tokenFromRequest(req);
+      const user = auth.validateSession(token);
       if (!user) {
         sendJson(res, 401, { error: 'not signed in' });
         return;
       }
       (req as any)._rsUser = user;
+      /*
+       * Re-issue the cookie on every authenticated request. The server slides a
+       * session's expiry as it is used, but Max-Age was fixed at login - so
+       * someone who used the app daily was still bounced to the login page on
+       * day 30 while their session row was perfectly valid. Routes that set
+       * their own cookie (login, logout) run after this and overwrite it.
+       */
+      if (token) res.setHeader('set-cookie', auth.sessionCookie(token, tlsOptions !== null));
     }
     if (await dispatch(req, res)) return;
     sendJson(res, 404, { error: 'no such endpoint' });

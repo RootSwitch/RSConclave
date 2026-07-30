@@ -17,7 +17,29 @@ export function onConnectSnapshot(fn: (username: string) => Record<string, unkno
   snapshotProvider = fn;
 }
 
+/*
+ * Connection caps.
+ *
+ * Nothing limited /events, and every token of every run iterates the whole
+ * client set - so a client that opened streams in a loop degraded generation
+ * for everyone, not just itself. A person needs one stream per open tab; the
+ * per-user cap is generous for that and the global one is a backstop.
+ */
+const MAX_STREAMS_PER_USER = 12;
+const MAX_STREAMS_TOTAL = 200;
+
+function streamsFor(username: string): number {
+  let n = 0;
+  for (const c of clients) if (c.username === username) n++;
+  return n;
+}
+
 export function handleSse(req: IncomingMessage, res: ServerResponse, username: string): void {
+  if (clients.size >= MAX_STREAMS_TOTAL || streamsFor(username) >= MAX_STREAMS_PER_USER) {
+    res.writeHead(429, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'too many open event streams - close some tabs' }));
+    return;
+  }
   res.writeHead(200, {
     'content-type': 'text/event-stream',
     'cache-control': 'no-cache',

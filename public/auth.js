@@ -27,12 +27,17 @@ const Auth = {
       ? el('input', { type: 'password', placeholder: 'Password again', autocomplete: 'new-password' })
       : null;
 
+    // Guarded: two quick Enters fired setup twice, and the second attempt lost
+    // the race against its own account being created.
+    let submitting = false;
     const submit = async () => {
+      if (submitting) return;
       err.textContent = '';
       if (needsSetup && passEl.value !== pass2El.value) {
         err.textContent = 'Passwords do not match.';
         return;
       }
+      submitting = true;
       try {
         if (needsSetup) await Api.authSetup(userEl.value.trim(), passEl.value);
         else await Api.authLogin(userEl.value.trim(), passEl.value);
@@ -41,6 +46,7 @@ const Auth = {
         location.reload();
       } catch (e) {
         err.textContent = e.message;
+        submitting = false; // failed attempt: let them correct it and retry
       }
     };
     for (const input of [userEl, passEl, pass2El]) {
@@ -63,7 +69,10 @@ const Auth = {
       ),
     );
     document.body.append(this.overlay);
-    (needsSetup ? userEl : userEl).focus();
+    // The ternary here used to pick userEl either way, which was a no-op. Focus
+    // where the person actually has to type: the password box when the browser
+    // has already filled the username in, the username box otherwise.
+    (userEl.value && !needsSetup ? passEl : userEl).focus();
   },
 
   hide() {

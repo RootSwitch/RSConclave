@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hashPassword, verifyPassword, validUsername, parseCookies } from '../auth.ts';
+import { hashPassword, noteLoginAttempt, parseCookies, recordLoginSuccess, validUsername, verifyPassword } from '../auth.ts';
 
 test('hashPassword/verifyPassword: round trip', async () => {
   const stored = await hashPassword('correct horse battery staple');
@@ -50,4 +50,37 @@ test('parseCookies: normal, malformed, and missing headers', () => {
   // an undecodable value must be skipped, not throw
   assert.deepEqual(parseCookies('bad=%; good=ok'), { good: 'ok' });
   assert.equal(parseCookies('rsconclave_session=tok123; x=y').rsconclave_session, 'tok123');
+});
+
+/*
+ * The counting has to happen at the START of an attempt. When it ran after the
+ * awaited scrypt, concurrent requests all passed the check before any of them
+ * had recorded a failure - the review tried 60 passwords at once for zero 429s.
+ * These tests use distinct IPs because the limiter is per source address.
+ */
+test('noteLoginAttempt: allows MAX_FAILURES attempts then locks the IP out', () => {
+  const ip = 'test-ip-lockout';
+  for (let i = 0; i < 5; i++) {
+    assert.equal(noteLoginAttempt(ip), true, `attempt ${i + 1} should be allowed`);
+  }
+  assert.equal(noteLoginAttempt(ip), false, 'the 6th attempt must be refused');
+  assert.equal(noteLoginAttempt(ip), false, 'and it stays refused');
+});
+
+test('noteLoginAttempt: a successful sign-in clears the count', () => {
+  const ip = 'test-ip-success';
+  noteLoginAttempt(ip);
+  noteLoginAttempt(ip);
+  recordLoginSuccess(ip);
+  // Back to a full budget: someone who mistyped twice and then got it right
+  // must not be one attempt away from a lockout.
+  for (let i = 0; i < 5; i++) assert.equal(noteLoginAttempt(ip), true);
+});
+
+test('noteLoginAttempt: lockouts are per IP', () => {
+  const a = 'test-ip-a';
+  const b = 'test-ip-b';
+  for (let i = 0; i < 6; i++) noteLoginAttempt(a);
+  assert.equal(noteLoginAttempt(a), false);
+  assert.equal(noteLoginAttempt(b), true, 'one attacker must not lock everyone else out');
 });

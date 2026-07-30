@@ -21,22 +21,54 @@ export function route(method: string, pattern: string, handler: Handler): void {
   routes.push({ method, segments: pattern.split('/').filter(Boolean), handler });
 }
 
-const MAX_BODY = 10 * 1024 * 1024;
+/*
+ * Body caps.
+ *
+ * One 10 MB cap for everything meant the two PUBLIC routes - login and setup -
+ * would each buffer 10 MB from an unauthenticated client before looking at it,
+ * and then hand the result to scrypt. A couple of hundred concurrent requests
+ * was gigabytes held plus a saturated libuv threadpool, with every other fs and
+ * crypto job queued behind the scrypt runs. Credentials are a few hundred bytes;
+ * the cap should say so.
+ */
+const MAX_BODY = 1024 * 1024;
+/** Public, unauthenticated routes: enough for a username and a password. */
+export const SMALL_BODY = 4 * 1024;
+/** Session import, the one route that legitimately carries a large document. */
+export const BIG_BODY = 10 * 1024 * 1024;
 
-export function readJsonBody(req: IncomingMessage): Promise<any> {
+export function readJsonBody(req: IncomingMessage, max = MAX_BODY): Promise<any> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     let tooLarge = false;
+
+    // Refuse on the declared length before reading a byte, when it is declared.
+    const declared = Number(req.headers['content-length']);
+    if (Number.isFinite(declared) && declared > max) {
+      req.resume();
+      reject(new HttpError(413, 'body too large'));
+      return;
+    }
+
     req.on('data', (c: Buffer) => {
-      if (tooLarge) return; // already rejected; drain and discard the rest
       size += c.length;
-      if (size > MAX_BODY) {
+      if (tooLarge) {
+        /*
+         * Already rejected. Draining lets the 413 reach the client (destroying
+         * the socket here closed it first, so the client only saw a dropped
+         * connection), but an unbounded drain means a chunked body can keep
+         * streaming forever after the response. Give it a grace window, then
+         * hang up. A fixed window rather than a multiple of the cap: the public
+         * cap is 4 KB, and a client that is a little over deserves to read its
+         * 413 rather than see the socket vanish.
+         */
+        if (size > max + 64 * 1024) req.destroy();
+        return;
+      }
+      if (size > max) {
         tooLarge = true;
         chunks.length = 0; // stop holding what we read
-        // Drain rather than destroy. Destroying here closed the socket before
-        // the 413 could be written, so the client saw a dropped connection
-        // instead of an error it could report.
         req.resume();
         reject(new HttpError(413, 'body too large'));
         return;

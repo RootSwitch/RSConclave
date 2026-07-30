@@ -148,6 +148,13 @@ export async function setUserPassword(username: string, password: string): Promi
 // does not exist so timing does not reveal which usernames are real.
 let dummyHashP: Promise<string> | null = null;
 const dummyHash = () => (dummyHashP ??= hashPassword('no-such-user-timing-pad'));
+/*
+ * Warm it at import. Lazily initialised, the FIRST unknown-user login of each
+ * process paid two scrypt runs instead of one - a measurable "this username
+ * does not exist" right after every restart, which is exactly what the pad
+ * exists to hide.
+ */
+void dummyHash();
 export async function checkLogin(username: string, password: string): Promise<string | null> {
   const attempt = String(username || '').trim().toLowerCase();
   const row = loadUsers().find((u) => u.username.toLowerCase() === attempt);
@@ -208,8 +215,15 @@ export function validateSession(token: string | null): string | null {
 export function destroySession(token: string | null): void {
   if (!token) return;
   const sessions = loadSessions();
-  const row = sessions[sha256(token)];
-  if (delete sessions[sha256(token)]) saveSessions(sessions);
+  const key = sha256(token);
+  const row = sessions[key];
+  // `delete` returns true for a key that was never there, so every bogus-token
+  // logout used to rewrite authsessions.json - unauthenticated write
+  // amplification. Only a row that existed is worth a write.
+  if (row) {
+    delete sessions[key];
+    saveSessions(sessions);
+  }
   // An SSE stream is authenticated only when it opens, so it would keep
   // streaming after the cookie behind it stopped being valid.
   if (row) closeUserStreams(row.username);
@@ -263,31 +277,59 @@ const failures = new Map<string, { count: number; lockedUntil: number }>();
 const MAX_FAILURES = 5;
 const LOCKOUT_MS = 60 * 1000;
 
-export function loginAllowed(ip: string): boolean {
-  const f = failures.get(ip);
-  if (!f) return true;
-  if (f.lockedUntil && f.lockedUntil <= Date.now()) {
-    failures.delete(ip);
-    return true;
+const MAX_TRACKED_IPS = 10_000;
+
+/*
+ * Keyed by client IP, so the map is attacker-growable. Expired entries go
+ * first; if every entry is still an active lock we drop the oldest anyway,
+ * because a sweep that can free nothing is not a bound. Oldest are also the
+ * closest to expiring, so it costs an attacker very little time.
+ */
+function sweepFailures(now: number): void {
+  if (failures.size < MAX_TRACKED_IPS) return;
+  for (const [k, v] of failures) {
+    if (!v.lockedUntil || v.lockedUntil <= now) failures.delete(k);
   }
-  return !f.lockedUntil;
-}
-export function recordLoginFailure(ip: string): void {
-  // Keyed by client IP, so the map is attacker-growable - sweep expired
-  // entries before it matters.
-  if (failures.size > 10000) {
-    const now = Date.now();
-    for (const [k, v] of failures) {
-      if (!v.lockedUntil || v.lockedUntil <= now) failures.delete(k);
+  if (failures.size >= MAX_TRACKED_IPS) {
+    let drop = failures.size - Math.floor(MAX_TRACKED_IPS / 2);
+    for (const k of failures.keys()) {
+      if (drop-- <= 0) break;
+      failures.delete(k);
     }
+  }
+}
+
+/*
+ * Count the attempt BEFORE doing any of the work, and report whether it is
+ * allowed.
+ *
+ * The old split - check `loginAllowed`, then increment only after `await
+ * readJsonBody` and the awaited scrypt - limited sequential attackers and
+ * nobody else. Sixty concurrent POSTs all passed the check before the first
+ * failure was recorded, so sixty passwords were tried for zero 429s and the
+ * guess rate scaled with the attacker's socket count. Reproduced by the review.
+ *
+ * Counting up front is what closes it: Node runs these increments to
+ * completion one after another, so the sixth concurrent request sees the count
+ * the first five already left behind. A correct password clears the counter
+ * (recordLoginSuccess), so a person who signs in successfully is unaffected.
+ */
+export function noteLoginAttempt(ip: string): boolean {
+  const now = Date.now();
+  sweepFailures(now);
+  const existing = failures.get(ip);
+  if (existing?.lockedUntil) {
+    if (existing.lockedUntil > now) return false;
+    failures.delete(ip);
   }
   const f = failures.get(ip) ?? { count: 0, lockedUntil: 0 };
   f.count++;
   if (f.count >= MAX_FAILURES) {
     f.count = 0;
-    f.lockedUntil = Date.now() + LOCKOUT_MS;
+    f.lockedUntil = now + LOCKOUT_MS;
   }
   failures.set(ip, f);
+  return true;
 }
 export function recordLoginSuccess(ip: string): void {
   failures.delete(ip);
