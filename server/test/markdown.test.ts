@@ -24,6 +24,15 @@ test('markdown: a bare pipe row does not hang the parser', { timeout: 3000 }, ()
   assert.equal(ok[0].t, 'table');
 });
 
+// A fence labelled ```constructor used to resolve through Object.prototype and
+// produce "snippet.function Object() { [native code] }" as a download name.
+test('markdown: prototype keys as a fence language fall back to .txt', () => {
+  assert.equal(mdFileName('py'), 'snippet.py');
+  assert.equal(mdFileName('constructor'), 'snippet.txt');
+  assert.equal(mdFileName('__proto__'), 'snippet.txt');
+  assert.equal(mdFileName('toString'), 'snippet.txt');
+});
+
 test('markdown: headings, paragraphs and rules', () => {
   const b = parseMarkdown('### Summary\n\nSome text.\n\n---');
   assert.equal(b[0].t, 'h');

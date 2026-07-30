@@ -13,10 +13,55 @@ const USERS_DIR = path.join(DATA_DIR, 'users');
 
 fs.mkdirSync(USERS_DIR, { recursive: true });
 
+/*
+ * Write via a temp file and rename, with an fsync in between.
+ *
+ * Without the fsync the rename can land before the data does, so a power loss
+ * leaves a present-but-empty file - which is precisely the state that used to
+ * re-open first-run setup to the whole network and then overwrite the account
+ * list. The temp name carries the pid and a counter because a fixed ".tmp"
+ * means two processes sharing a data directory (a stray `npm start` beside the
+ * container, or overlapping `node --watch` reloads) interleave onto the same
+ * path and can rename each other's half-written file into place.
+ */
+let tmpCounter = 0;
 function atomicWrite(file: string, obj: unknown): void {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
-  fs.renameSync(tmp, file);
+  const tmp = `${file}.${process.pid}.${tmpCounter++}.tmp`;
+  const fd = fs.openSync(tmp, 'w');
+  try {
+    fs.writeFileSync(fd, JSON.stringify(obj, null, 2), 'utf8');
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  try {
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    // Windows fails EPERM/EBUSY when anything (AV, a sync client, a backup
+    // agent) holds the destination open. Retrying briefly beats losing the
+    // write; a stale temp file is cleaned up either way.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES') {
+      try { fs.unlinkSync(tmp); } catch {}
+      throw err;
+    }
+    let renamed = false;
+    for (let i = 0; i < 20 && !renamed; i++) {
+      try {
+        fs.renameSync(tmp, file);
+        renamed = true;
+      } catch {
+        // Busy-wait deliberately: this is a synchronous API used from request
+        // handlers, so there is nowhere to await. 20 x ~5ms is the whole budget.
+        const until = Date.now() + 5;
+        while (Date.now() < until) { /* spin */ }
+      }
+    }
+    if (!renamed) {
+      try { fs.unlinkSync(tmp); } catch {}
+      throw err;
+    }
+  }
 }
 
 // --- global scope: config.json, users.json, authsessions.json ---
@@ -27,6 +72,40 @@ export function load<T>(name: string, fallback: T): T {
     return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
   } catch {
     return fallback;
+  }
+}
+
+/*
+ * load() for a file whose absence and whose corruption mean different things.
+ *
+ * The tolerant load() above swallows everything - corrupt JSON, EACCES, EBUSY,
+ * a zero-length file - and hands back the fallback. For users.json that turned
+ * a truncated file into "this instance has no accounts": /api/session reported
+ * needsSetup, an unauthenticated stranger could claim it, and the save then
+ * rewrote users.json with only their account. Confirmed end to end, and it does
+ * not need an attacker - power loss and a backup client holding the file both
+ * produce it, and the owner is locked out of their own transcripts.
+ *
+ * Missing is fine and returns the fallback. Present-but-unreadable throws, so
+ * callers fail closed rather than concluding the file was empty.
+ */
+export function loadCritical<T>(name: string, fallback: T): T {
+  const file = path.join(DATA_DIR, name + '.json');
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fallback;
+    throw new Error(`cannot read ${name}.json (${(err as Error).message}) - refusing to treat it as empty`);
+  }
+  if (!raw.trim()) {
+    throw new Error(`${name}.json exists but is empty - refusing to treat it as empty. ` +
+      'Restore it from a backup, or delete it deliberately to start over.');
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    throw new Error(`${name}.json is not valid JSON (${(err as Error).message}) - refusing to treat it as empty`);
   }
 }
 

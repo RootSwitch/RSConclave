@@ -67,7 +67,9 @@ export function validUsername(name: string): boolean {
 }
 
 function loadUsers(): UserRecord[] {
-  return store.load<UserRecord[]>('users', []);
+  // Critical, not tolerant: a users.json that exists but cannot be parsed must
+  // never read as "no accounts yet". See store.loadCritical.
+  return store.loadCritical<UserRecord[]>('users', []);
 }
 function saveUsers(users: UserRecord[]): void {
   store.save('users', users);
@@ -77,7 +79,20 @@ export function anyUsers(): boolean {
   return loadUsers().length > 0;
 }
 
-export async function createUser(username: string, password: string): Promise<string> {
+/*
+ * mustBeFirst closes the instance-claim race. /api/setup checked anyUsers()
+ * before awaiting the request body and the password hash, and createUser only
+ * ever re-checked for a duplicate NAME - so three concurrent setups all
+ * succeeded, and an attacker who opened a setup request with a slowly dribbled
+ * body could complete it after the real owner had claimed the instance and get
+ * a valid session on a claimed box. The check belongs here, inside the same
+ * synchronous read-modify-write as the save.
+ */
+export async function createUser(
+  username: string,
+  password: string,
+  opts?: { mustBeFirst?: boolean },
+): Promise<string> {
   const name = String(username || '').trim();
   if (!validUsername(name)) {
     throw new Error('Username: 2-32 characters, starts with a letter or digit, then letters/digits/dot/dash/underscore.');
@@ -90,6 +105,9 @@ export async function createUser(username: string, password: string): Promise<st
   // both loaded the pre-existing list and the second save dropped the first.
   const password_ = await hashPassword(password);
   const users = loadUsers();
+  if (opts?.mustBeFirst && users.length > 0) {
+    throw new Error('This instance has already been claimed - sign in instead.');
+  }
   if (users.some((u) => u.username.toLowerCase() === name.toLowerCase())) {
     throw new Error('That username already exists.');
   }

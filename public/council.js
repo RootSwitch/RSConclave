@@ -43,7 +43,16 @@ const Council = {
   },
 
   buildReconsolidate(session) {
-    const cfg = session.config.consolidator;
+    // An imported session's config is stored as-is, so it may be missing the
+    // consolidator entirely. Dereferencing it threw mid-mount, after the view
+    // had already been wiped: showView never ran and App.session pointed at a
+    // session that was not on screen.
+    const cfg = session.config?.consolidator;
+    if (!cfg) {
+      return el('div', { class: 'error-text', style: 'margin-bottom: 12px' },
+        'This session has no consolidator in its config - it was probably imported from ' +
+        'an incomplete export. The transcript below is intact; re-running consolidation is not available.');
+    }
     const templateEl = el('textarea', { rows: 6 }, cfg.template);
 
     // Engine is editable here, not just the template. A council with enough

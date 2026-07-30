@@ -78,7 +78,9 @@ route('POST', '/api/setup', async (req, res) => {
   if (!body.password || String(body.password).length < 8) {
     throw new HttpError(400, 'Password must be at least 8 characters.');
   }
-  const name = await auth.createUser(String(body.username || 'admin'), String(body.password));
+  // mustBeFirst: the anyUsers() check above happens before two awaits, so it
+  // cannot be the thing that decides. See createUser.
+  const name = await auth.createUser(String(body.username || 'admin'), String(body.password), { mustBeFirst: true });
   // Whoever claims the instance owns whatever was in it before accounts
   // existed - sessions, personas, presets all move under this user.
   store.migrateLegacyData(name);
@@ -138,6 +140,12 @@ route('POST', '/api/users', async (req, res) => {
 route('DELETE', '/api/users/:name', (req, res, params) => {
   const me = userOf(req);
   if (params.name === me) throw new HttpError(400, 'You cannot delete your own account.');
+  // Order matters: end their run BEFORE archiving their data. A live run holds
+  // the session in memory and its next persist would recreate the directory
+  // that was just archived, so a recreated username would inherit the
+  // transcripts. It also frees the box, which nobody else could do - stop and
+  // cancel both require being the run's owner, and that account is gone.
+  engine.evictUser(params.name);
   auth.deleteUser(params.name);
   sendJson(res, 200, { ok: true });
 });

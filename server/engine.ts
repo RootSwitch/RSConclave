@@ -369,9 +369,14 @@ function makeTitle(text: string): string {
 
 export function startCouncil(username: string, config: CouncilConfig): string {
   assertIdle();
+  // Validate BEFORE displacing anything. takeover() clears another user's
+  // parked run, so a request that then threw on its own bad config destroyed
+  // someone else's session and accomplished nothing.
+  if (!config?.members?.length) throw new Error('no council members selected');
+  if (!config.consolidator?.model) throw new Error('no consolidator selected');
+  if (typeof config.prompt !== 'string' || !config.prompt.trim()) throw new Error('prompt is empty');
   releaseActive(username);
   takeover(username);
-  if (!config.members?.length) throw new Error('no council members selected');
   const session: Session = {
     id: store.newId(),
     mode: 'council',
@@ -542,11 +547,12 @@ function requireSession(username: string, sessionId: string): Active {
 
 export function startRoundtable(username: string, config: RoundtableConfig): string {
   assertIdle();
-  releaseActive(username);
-  takeover(username);
-  if (!config.participants?.length || config.participants.length < 2) {
+  // Validated before takeover - see startCouncil.
+  if (!config?.participants?.length || config.participants.length < 2) {
     throw new Error('need at least 2 participants');
   }
+  releaseActive(username);
+  takeover(username);
   const session: Session = {
     id: store.newId(),
     mode: 'roundtable',
@@ -586,7 +592,9 @@ export function step(username: string, nextParticipantId?: string, auto?: number
   if (a.session.mode !== 'roundtable') throw new Error('not a roundtable session');
   if (a.phase === 'generating') throw new Error('a generation is already running');
   a.pauseRequested = false;
-  a.autoRemaining = Math.max(0, auto ?? 0);
+  // Capped: an uncapped count let one request hold the box indefinitely
+  // (`{auto: 1e9}`), and no plausible roundtable needs more than this in one go.
+  a.autoRemaining = Math.min(200, Math.max(0, auto ?? 0));
   launch(() => roundtableLoop(nextParticipantId));
 }
 
@@ -708,9 +716,9 @@ export function rerollLast(username: string): void {
 
 export function startChat(username: string, config: ChatConfig): string {
   assertIdle();
+  if (!config?.model || !config.endpointId) throw new Error('pick an endpoint and model');
   releaseActive(username);
   takeover(username);
-  if (!config.model || !config.endpointId) throw new Error('pick an endpoint and model');
   const session: Session = {
     id: store.newId(),
     mode: 'chat',
@@ -784,9 +792,9 @@ async function runChatTurn(): Promise<void> {
 
 export function startPipeline(username: string, config: PipelineConfig): string {
   assertIdle();
+  pipeline.validatePipeline(config); // before takeover - see startCouncil
   releaseActive(username);
   takeover(username);
-  pipeline.validatePipeline(config);
   const session: Session = {
     id: store.newId(),
     mode: 'pipeline',
@@ -960,6 +968,30 @@ export function setTags(username: string, sessionId: string, tags: string[]): vo
   if (!s) throw new Error('session not found');
   s.tags = tags.length ? tags : undefined;
   store.saveSession(username, s);
+}
+
+/**
+ * Force a run to end because its owner is being deleted.
+ *
+ * Two problems needed this. The live run still held the session in memory, so
+ * the next persist recreated the data directory that deleteUser had just
+ * archived - handing a recreated username the previous person's transcripts,
+ * the exact leak archiving exists to prevent. And stop/cancel/pause all go
+ * through assertOwn, so a deleted user's in-flight generation could not be
+ * stopped by anyone and the box stayed occupied until the stream ended on its
+ * own - forever, against a stalled endpoint.
+ *
+ * Unlike stopRun this takes no owner check, because the caller has already
+ * decided the account is going away.
+ */
+export function evictUser(username: string): void {
+  if (!active || active.owner !== username) return;
+  active.pauseRequested = true;
+  active.autoRemaining = 0;
+  active.abort?.abort();
+  active = null;
+  broadcast('state', { sessionId: null, phase: 'idle' }, username);
+  broadcast('busy', { busy: false });
 }
 
 export function cancelGeneration(username: string): void {

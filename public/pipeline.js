@@ -32,7 +32,11 @@ const Pipeline = {
           cloneButton(session),
         ),
         el('div', { class: 'muted', style: 'margin-bottom: 10px' },
-          'Stages: ' + session.config.stages.map((s, i) => `${i + 1}. ${s.name?.trim() || s.model}`).join(' → ')),
+          // config.stages can be absent on an imported session; a throw here
+          // left the view half-mounted.
+          (session.config?.stages?.length
+            ? 'Stages: ' + session.config.stages.map((s, i) => `${i + 1}. ${s.name?.trim() || s.model}`).join(' → ')
+            : 'No stages in this session config (imported from an incomplete export).')),
       );
     }
 

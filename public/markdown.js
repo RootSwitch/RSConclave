@@ -153,7 +153,14 @@ function parseMarkdown(raw) {
 // Fence info string -> a filename for "save". Pure so the test suite can
 // pin the mapping. Unknown or missing labels fall back to .txt - a wrong
 // extension is a rename, a failed save is a bug report.
-const MD_EXT = {
+/*
+ * Prototype-less on purpose. As a plain object literal, a fence labelled
+ * ```constructor (or __proto__, or toString) resolved through Object.prototype
+ * and produced filenames like "snippet.function Object() { [native code] }" -
+ * the ?? fallback never fired because those lookups are truthy, not undefined.
+ * Object.create(null) has no inherited keys, so only the real mappings match.
+ */
+const MD_EXT = Object.assign(Object.create(null), {
   powershell: 'ps1', ps1: 'ps1', python: 'py', py: 'py',
   javascript: 'js', js: 'js', typescript: 'ts', ts: 'ts',
   bash: 'sh', sh: 'sh', shell: 'sh', zsh: 'sh',
@@ -163,7 +170,7 @@ const MD_EXT = {
   markdown: 'md', md: 'md', toml: 'toml', ini: 'ini', diff: 'diff',
   c: 'c', cpp: 'cpp', java: 'java', go: 'go', rust: 'rs', rs: 'rs',
   ruby: 'rb', rb: 'rb', php: 'php', kotlin: 'kt', swift: 'swift',
-};
+});
 function mdFileName(lang) {
   if (lang === 'dockerfile') return 'Dockerfile';
   return 'snippet.' + (MD_EXT[lang] ?? 'txt');
