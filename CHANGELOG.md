@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- **The Windows launcher stopped printing advice that would break the app.**
+  Adding `package.json` made Node emit `MODULE_TYPELESS_PACKAGE_JSON` and
+  suggest adding `"type": "module"` - the one change confirmed to break this
+  project. The npm scripts, the Dockerfile and the screenshot runner all
+  suppress that warning; `RSConclave.cmd` calls node directly and was missed,
+  so it printed the warning in the very window the README tells a user to leave
+  open. Fixed, along with three other things in the same file:
+
+  It waits with `ping` rather than `timeout`, because `timeout` needs a real
+  console and dies with "Input redirection is not supported" the moment stdin is
+  redirected - which is what happens when the launcher is started from a
+  shortcut, a scheduled task or a wrapper rather than by double-clicking.
+
+  It opens the scheme the server will actually be listening on. The server
+  switches itself to HTTPS whenever it finds a certificate pair, and the
+  launcher always opened `http://`, which just fails with nothing to explain
+  why.
+
+  It checks that Node exists and is at least 22 before launching, and says what
+  to install if not, with a `pause` so the message survives a double-click.
+  Previously a missing or too-old Node closed the minimized window instantly and
+  left a dead browser tab as the only symptom.
+
+  `.gitattributes` now pins `*.cmd` to CRLF, the mirror of the existing LF rule
+  for `*.sh`. cmd.exe mishandles LF in some constructs, and this file is the
+  entry point for anyone handed the app on Windows.
+
 - **A Socratic Tutor persona, and one fewer example in the roundtable form.**
   The tutor teaches only by asking and is forbidden from confirming an answer
   even when the student is one step away, which makes it the second deliberate

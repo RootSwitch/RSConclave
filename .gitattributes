@@ -1,3 +1,8 @@
 # Shell scripts must stay LF - they run inside/alongside the Linux container.
 *.sh text eol=lf
+
+# Batch files are the mirror image: CRLF is the safe form for cmd.exe, which
+# mishandles LF in some constructs. This only matters for RSConclave.cmd, which
+# is the entry point for anyone handed the app on Windows.
+*.cmd text eol=crlf
 * text=auto
