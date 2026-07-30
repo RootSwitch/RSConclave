@@ -12,18 +12,22 @@
 # that still fits.
 #
 # Usage:
-#   ./measure-ctx.sh MODEL [--host URL] [--vram GB] [--low N] [--high N]
+#   ./measure-ctx.sh MODEL [--host URL] [--vram GB] [--low N] [--high N] [--apply]
 #
 #   --host   Ollama base URL          (default: http://127.0.0.1:11434)
 #   --vram   usable VRAM budget in GB (default: auto-detect, else 24)
 #   --low    small probe context      (default: 2048)
 #   --high   large probe context      (default: 8192)
+#   --apply  bake the recommended num_ctx into the model via ollama create
 #
 # Example:
-#   ./measure-ctx.sh qwen3-coder:30b --vram 24
+#   ./measure-ctx.sh qwen3-coder:30b --vram 24 --apply
 #
-# Loading a big model twice takes a few minutes. Nothing is written or
-# changed - the model is unloaded again at the end.
+# Loading a big model twice takes a few minutes. Without --apply nothing is
+# written or changed - the model is unloaded again at the end. With --apply
+# the recommendation is written into the model itself: same name, a rebuild
+# over the same blobs (no re-download), and every client of the daemon gets
+# the new default, not just RSConclave.
 set -eu
 
 HOST=http://127.0.0.1:11434
@@ -31,6 +35,7 @@ VRAM_GB=""
 LOW=2048
 HIGH=8192
 MODEL=""
+APPLY=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -38,7 +43,8 @@ while [ $# -gt 0 ]; do
         --vram) VRAM_GB=$2; shift 2 ;;
         --low)  LOW=$2; shift 2 ;;
         --high) HIGH=$2; shift 2 ;;
-        -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --apply) APPLY=1; shift ;;
+        -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*) echo "unknown option: $1" >&2; exit 2 ;;
         *)  MODEL=$1; shift ;;
     esac
@@ -87,7 +93,7 @@ curl -sf -m 60 -X POST "$HOST/api/generate" -H 'content-type: application/json' 
 
 [ -n "$LOW_OUT" ] && [ -n "$HIGH_OUT" ] || { echo "could not read /api/ps for $MODEL" >&2; exit 1; }
 
-awk -v lo="$LOW" -v hi="$HIGH" -v lo_out="$LOW_OUT" -v hi_out="$HIGH_OUT" -v vram="$VRAM_GB" -v model="$MODEL" '
+REPORT=$(awk -v lo="$LOW" -v hi="$HIGH" -v lo_out="$LOW_OUT" -v hi_out="$HIGH_OUT" -v vram="$VRAM_GB" -v model="$MODEL" '
 BEGIN {
     split(lo_out, a, " "); split(hi_out, b, " ");
     lo_total = a[1]; lo_vram = a[2];
@@ -126,4 +132,30 @@ BEGIN {
     if (p >= 131072) printf "  That is at or beyond most models trained maximum - check ollama show %s.\n", model;
     printf "\nSet it per seat in RSConclave, or bake it in for every client:\n";
     printf "  printf '"'"'FROM %s\\nPARAMETER num_ctx %d\\n'"'"' > mf && ollama create %s -f mf\n", model, p, model;
-}'
+}')
+printf '%s\n' "$REPORT"
+
+# --apply: do the bake ourselves. The number is parsed back out of the report
+# rather than computed a second time, so what gets applied is BY CONSTRUCTION
+# what was shown - two code paths deriving it independently is how they drift.
+if [ "$APPLY" -eq 1 ]; then
+    REC=$(printf '%s\n' "$REPORT" | sed -n 's/.*Recommended num_ctx *: *\([0-9][0-9]*\).*/\1/p')
+    if [ -z "$REC" ]; then
+        echo "apply: nothing to apply - the model does not fit this budget at any context" >&2
+        exit 1
+    fi
+    command -v ollama >/dev/null 2>&1 || { echo "apply: the ollama CLI is required for --apply" >&2; exit 1; }
+    MF=$(mktemp)
+    printf 'FROM %s\nPARAMETER num_ctx %s\n' "$MODEL" "$REC" > "$MF"
+    # Same name on purpose: every client of this daemon gets the new default.
+    # OLLAMA_HOST is set from --host so the CLI talks to the same box we measured.
+    echo ""
+    echo "applying: ollama create $MODEL (num_ctx $REC)"
+    if ! OLLAMA_HOST="$HOST" ollama create "$MODEL" -f "$MF"; then
+        rm -f "$MF"
+        echo "apply: ollama create failed" >&2
+        exit 1
+    fi
+    rm -f "$MF"
+    echo "done - $MODEL now defaults to num_ctx $REC for every client"
+fi

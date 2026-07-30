@@ -194,6 +194,7 @@ if [ "$WITH_OLLAMA_HOST" -eq 1 ]; then
             warn "  Environment=\"OLLAMA_HOST=0.0.0.0:11434\""
         fi
     else
-        warn "no running Ollama service found on this host - see docs/inference-host.md"
+        warn "no running Ollama service found on this host - tools/install-ollama.sh sets"
+        warn "one up (GPU check, systemd settings, firewall), or see docs/inference-host.md"
     fi
 fi

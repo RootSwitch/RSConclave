@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+- **Standing up the inference box is now one command, context sizing
+  included.** `tools/install-ollama.sh` is the companion to `install.sh`: that
+  one deploys RSConclave, this one prepares the box it talks to. It detects
+  the GPU vendor (or takes `--gpu nvidia|amd|cpu`), installs Ollama, writes a
+  systemd drop-in for the bind address, model directory and keep-alive,
+  restricts port 11434 to the hosts you name, and verifies the API answers.
+  With `--pull MODEL --tune` it goes the last step: pull a model, measure its
+  real per-token memory cost, and bake the largest fully-resident `num_ctx`
+  into it - so the box comes up with the silent-truncation trap already
+  closed. The tuning is `tools/measure-ctx.sh --apply`, new alongside it: the
+  measuring tool can now write its own recommendation into the model (same
+  name, a rebuild over the same blobs, every client benefits). The applied
+  number is parsed back out of the printed report rather than computed twice,
+  so what is applied is by construction what was shown.
+
+  Two refusals are the point of the script. It will not install drivers - a
+  reboot mid-script is a bad surprise, and docs/inference-host.md covers that
+  part - and it will not proceed when a GPU is present but its driver does not
+  answer (`nvidia-smi` for NVIDIA, `/dev/kfd` for AMD), because the failure
+  that produces is the worst one this box has: everything starts, everything
+  answers, and generation runs at CPU speed with nothing anywhere saying why.
+  After the restart it surfaces Ollama's own "inference compute" verdict, so
+  CPU fallback is announced instead of discovered three days later. Pass
+  `--gpu cpu` to accept CPU inference knowingly.
+
+  Honest caveat, also stated in the guide: the script targets a Linux systemd
+  box and was built on a machine that is neither. Every branch runs against a
+  stub harness (`dev/harness-install-ollama.sh`, committed - 24 checks
+  covering the drop-in content, idempotency, both refusal paths, the firewall
+  rules and the full pull-tune chain), and the harness already caught one real
+  bug (an empty `--allow-from` array collapsing a test to `[ = set ]`). What
+  stubs cannot prove is the real Ollama installer, systemd and a GPU behaving
+  as stubbed: its first run on a real box is a test, not a ceremony.
+
 - **The Windows launcher stopped printing advice that would break the app.**
   Adding `package.json` made Node emit `MODULE_TYPELESS_PACKAGE_JSON` and
   suggest adding `"type": "module"` - the one change confirmed to break this

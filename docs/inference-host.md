@@ -112,6 +112,25 @@ sudo chown -R ollama:ollama /mnt/models   # after installing Ollama in §4
 
 ## 4. Ollama
 
+Everything in this section is one command if you cloned RSConclave onto the box
+(it lives in the same repo, no other setup needed):
+
+```bash
+./tools/install-ollama.sh --models /mnt/models --allow-from 192.0.2.10     --pull qwen3-coder:30b --tune
+```
+
+That verifies the GPU driver actually works (refusing loudly if not - the
+failure it prevents is Ollama silently running on CPU), installs Ollama, writes
+the systemd settings below, restricts the port to the hosts you name, pulls a
+first model, and - the `--tune` part - measures that model's real per-token
+memory cost and bakes the largest fully-resident context window into it, which
+is section 6 done for you. AMD boxes add `--hsa-override 11.0.0` (RDNA3) or
+`10.3.0` (RDNA2) if needed. It is the newest tool in the repo: exercised
+against stubbed system commands, so treat its first run on a real box as a
+test, not a ceremony.
+
+The manual equivalent, which is also what to read when the script refuses:
+
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh    # installs a systemd service
 sudo systemctl edit ollama.service
@@ -317,11 +336,14 @@ with tool access are pointed at it.
    --usecase=rocm` plus `render`/`video` groups (AMD). Confirm with
    `nvidia-smi` / `rocm-smi`.
 4. Model disk mounted at `/mnt/models`, owned by `ollama`.
-5. Ollama installed; systemd override for `OLLAMA_HOST`, `OLLAMA_MODELS`,
-   `OLLAMA_KEEP_ALIVE`, plus `HSA_OVERRIDE_GFX_VERSION` on AMD if needed.
-6. Firewall: 11434 restricted to known hosts.
+5. Ollama: `./tools/install-ollama.sh --models /mnt/models --allow-from <hosts>`
+   (or by hand: systemd override for `OLLAMA_HOST`, `OLLAMA_MODELS`,
+   `OLLAMA_KEEP_ALIVE`, plus `HSA_OVERRIDE_GFX_VERSION` on AMD if needed).
+6. Firewall: 11434 restricted to known hosts (the script above does this for
+   the hosts you name).
 7. `vm.swappiness=10`.
 8. RSConclave via `tools/install.sh`; add the host Ollama endpoint in
    Settings.
-9. Pull models, run `tools/measure-ctx.sh` on each, bake `num_ctx` into
-   Modelfiles.
+9. Pull models; `tools/measure-ctx.sh MODEL --apply` measures each one's real
+   context cost and bakes the largest fully-resident `num_ctx` into it
+   (`--pull MODEL --tune` on the installer does both steps for the first one).
