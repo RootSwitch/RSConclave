@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **A slow first token no longer aborts the run at 120 seconds.** The idle timer
+  raced every read including the first, and a server that sends response headers
+  before it starts generating - llama.cpp's SSE does - spends the model load and
+  the prompt processing inside that first read. Loading a 30B from cold disk past
+  two minutes is ordinary, so the run died with "no data for 120s" while the UI
+  was still truthfully showing "loading model", which is precisely what the
+  README said would not happen. The first byte now gets its own 10-minute budget
+  and the 120s idle timer starts once bytes are arriving. Verified against a
+  stub that holds its first token for 125 seconds. The budget is generous rather
+  than absent because the box runs one generation at a time, so an endpoint that
+  never answers would otherwise hold that slot until someone pressed Cancel; the
+  README says so now.
+
+- **Exports survive an unclosed code fence, and show reasoning instead of hiding
+  it.** Entry text went into the document raw, so a single unbalanced ``` in any
+  reply swallowed the rest of the export into a code block when rendered, and
+  `<think>` blocks were emitted verbatim - which a markdown renderer treats as an
+  unknown HTML tag and drops entirely, so the reasoning either vanished or bled
+  into the answer with no delimiter. Fences are balanced now and reasoning is
+  quoted under a **reasoning** label. Cancelled turns are marked in the export
+  too, for the same reason they are marked in the UI. The export had no tests at
+  all; it has nine now.
+
+- **Stream reads no longer drop a truncated final character or keep a stray CR.**
+  The end-of-stream path never flushed the text decoder, so bytes held back for a
+  character that might have continued were silently discarded when the stream
+  simply stopped; and the final unterminated line skipped the carriage-return
+  strip every other line got.
+
+- **Search snippets stay on the match** when case-folding changes the string's
+  length (`İ` lowercases to two code units), which used to slide the snippet off
+  the text it was meant to be showing.
+
 - **Every reasoning block folds away, not just the first one.** The pattern was
   anchored at the start of the text and matched once, so a model that interleaves
   thinking with content - which the provider normaliser legitimately produces -

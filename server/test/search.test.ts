@@ -77,3 +77,23 @@ test('search: newest sessions first', () => {
   ], 'match');
   assert.deepEqual(r.map((x) => x.id), ['new', 'old']);
 });
+
+test('search: snippet stays on the match when case-folding changes length', () => {
+  /*
+   * "İ" lowercases to two code units, so an index taken from the lowercased
+   * copy pointed past the real match in the original and the snippet slid off it.
+   */
+  const lead = 'İ'.repeat(30);
+  const sessions = [session({ entries: [entry('m', `${lead} the needle is here`)] })];
+  const [r] = searchSessions(sessions, 'needle');
+  assert.ok(r, 'the match must still be found');
+  assert.match(r.hits[0].snippet, /needle/, 'the snippet must contain what was searched for');
+});
+
+test('search: ordinary text is unaffected by the offset mapping', () => {
+  const sessions = [session({ entries: [entry('m', 'a'.repeat(200) + ' findme ' + 'b'.repeat(200))] })];
+  const [r] = searchSessions(sessions, 'FINDME');
+  assert.match(r.hits[0].snippet, /findme/);
+  assert.match(r.hits[0].snippet, /^…/);
+  assert.match(r.hits[0].snippet, /…$/);
+});

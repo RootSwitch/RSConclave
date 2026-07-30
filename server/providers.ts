@@ -3,6 +3,12 @@
 import type { ChatMessage, Endpoint, GenParams, StreamResult } from './types.ts';
 
 const IDLE_TIMEOUT_MS = 120_000; // abort if no bytes arrive for this long mid-stream
+/*
+ * Budget for the first byte, which covers loading the model and processing the
+ * prompt on the remote box. Generous rather than absent: the run slot is a
+ * shared resource, so a box that never answers must not hold it forever.
+ */
+const FIRST_BYTE_TIMEOUT_MS = 10 * 60 * 1000;
 
 export async function discoverModels(endpoint: Endpoint): Promise<string[]> {
   const base = endpoint.baseUrl.replace(/\/+$/, '');
@@ -99,18 +105,39 @@ export async function* readLines(
   const decoder = new TextDecoder();
   let buf = '';
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let gotFirstByte = false;
   try {
     while (true) {
+      /*
+       * The FIRST read gets its own, much longer budget.
+       *
+       * Racing every read against the same 120s idle timer included the first
+       * one - and a server that sends response headers before it starts
+       * generating (llama.cpp's SSE does, and so does our own mock) spends the
+       * model load and the prompt processing inside that first read. Loading a
+       * 30B from cold disk past 120 seconds is ordinary, so the run aborted with
+       * "no data for 120s" while the UI was still truthfully saying "loading
+       * model". The README promised exactly that would not happen.
+       *
+       * Not unbounded, though: a wedged box would otherwise hold the only run
+       * slot until someone noticed and pressed Cancel.
+       */
+      const budget = gotFirstByte ? IDLE_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS;
       const idle = new Promise<never>((_, reject) => {
         idleTimer = setTimeout(
-          () => reject(new Error(`no data for ${IDLE_TIMEOUT_MS / 1000}s - giving up`)),
-          IDLE_TIMEOUT_MS,
+          () => reject(new Error(
+            gotFirstByte
+              ? `no data for ${IDLE_TIMEOUT_MS / 1000}s - giving up`
+              : `no first token after ${FIRST_BYTE_TIMEOUT_MS / 60000} minutes - giving up`,
+          )),
+          budget,
         );
       });
       const { done, value } = await Promise.race([reader.read(), idle]);
       clearTimeout(idleTimer);
       if (done) break;
       if (signal.aborted) break;
+      gotFirstByte = true;
       buf += decoder.decode(value, { stream: true });
       let nl: number;
       while ((nl = buf.indexOf('\n')) >= 0) {
@@ -118,7 +145,20 @@ export async function* readLines(
         buf = buf.slice(nl + 1);
       }
     }
-    if (buf.trim()) yield buf;
+    /*
+     * Flush the decoder. Every decode() above passes {stream: true}, which holds
+     * back the bytes of a character split across chunks - so a stream that ended
+     * mid-character left those bytes inside the decoder and they were simply
+     * lost. The flush can also complete a final line, hence the loop.
+     */
+    buf += decoder.decode();
+    let nl: number;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      yield buf.slice(0, nl).replace(/\r$/, '');
+      buf = buf.slice(nl + 1);
+    }
+    // The last line has no newline to strip a CR from, so do it here too.
+    if (buf.trim()) yield buf.replace(/\r$/, '');
   } finally {
     clearTimeout(idleTimer);
     reader.releaseLock();

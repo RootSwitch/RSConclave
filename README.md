@@ -442,8 +442,11 @@ exercise all four modes.
   send `keep_alive: 0` so the box frees VRAM between speakers; otherwise the endpoint's
   default keep_alive applies. Worth turning on when a model only just fits, since a
   still-resident previous speaker can make the next model's load fail its memory estimate.
-- Mid-stream stalls abort after 120s of silence; a slow first token (the model loading on the
-  remote box) is expected and shown as "loading model" without a timeout.
+- Mid-stream stalls abort after 120s of silence. A slow first token (the model loading on the
+  remote box) is expected and shown as "loading model", and gets its own 10-minute budget - the
+  120s idle timer only starts once bytes are actually arriving. The generous cap exists because
+  the box runs one generation at a time, so an endpoint that never answers would otherwise hold
+  that slot until someone pressed Cancel.
 
 ## License
 

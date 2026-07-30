@@ -22,6 +22,27 @@ const SNIPPET_RADIUS = 45;
 const HITS_PER_SESSION = 3;
 const MAX_SESSIONS = 50;
 
+/*
+ * Index in the ORIGINAL string of the first case-insensitive match.
+ *
+ * Lowercasing can change a string's length - "\u0130" becomes two code units -
+ * so an index found in the lowercased copy does not necessarily point at the
+ * same character in the original, and the snippet slid off the match it was
+ * supposed to be showing. The fast path covers every string whose case-folded
+ * form is the same length, which is essentially all of them.
+ */
+function ciIndexOf(text: string, needleLower: string): number {
+  const lowered = text.toLowerCase();
+  const at = lowered.indexOf(needleLower);
+  if (at <= 0 || lowered.length === text.length) return at;
+  let lowerLen = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (lowerLen >= at) return i;
+    lowerLen += text[i].toLowerCase().length;
+  }
+  return text.length;
+}
+
 function snippet(text: string, idx: number, qLen: number): string {
   const start = Math.max(0, idx - SNIPPET_RADIUS);
   const end = Math.min(text.length, idx + qLen + SNIPPET_RADIUS);
@@ -57,7 +78,7 @@ export function searchSessions(sessions: Session[], query: string): SearchResult
     const hits: SearchHit[] = [];
     let total = 0;
     const consider = (speaker: string, text: string) => {
-      const idx = text.toLowerCase().indexOf(q);
+      const idx = ciIndexOf(text, q);
       if (idx === -1) return;
       total++;
       if (hits.length < HITS_PER_SESSION) hits.push({ speaker, snippet: snippet(text, idx, q.length) });
