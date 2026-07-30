@@ -4,6 +4,7 @@
 // zero-dependency. The store holds only sha256(token); the cookie holds the
 // raw token.
 import crypto from 'node:crypto';
+import { InputError } from './errors.ts';
 import * as store from './store.ts';
 import { closeUserStreams } from './sse.ts';
 
@@ -95,10 +96,10 @@ export async function createUser(
 ): Promise<string> {
   const name = String(username || '').trim();
   if (!validUsername(name)) {
-    throw new Error('Username: 2-32 characters, starts with a letter or digit, then letters/digits/dot/dash/underscore.');
+    throw new InputError('Username: 2-32 characters, starts with a letter or digit, then letters/digits/dot/dash/underscore.');
   }
   if (loadUsers().some((u) => u.username.toLowerCase() === name.toLowerCase())) {
-    throw new Error('That username already exists.');
+    throw new InputError('That username already exists.', 409);
   }
   // Hash first, then re-read. Hashing awaits, and the read-modify-write either
   // side of that await is not atomic: two accounts created in the same instant
@@ -106,10 +107,10 @@ export async function createUser(
   const password_ = await hashPassword(password);
   const users = loadUsers();
   if (opts?.mustBeFirst && users.length > 0) {
-    throw new Error('This instance has already been claimed - sign in instead.');
+    throw new InputError('This instance has already been claimed - sign in instead.', 409);
   }
   if (users.some((u) => u.username.toLowerCase() === name.toLowerCase())) {
-    throw new Error('That username already exists.');
+    throw new InputError('That username already exists.', 409);
   }
   users.push({ username: name, password: password_, createdAt: new Date().toISOString() });
   saveUsers(users);
@@ -122,8 +123,8 @@ export function listUsers(): Array<{ username: string; createdAt: string }> {
 
 export function deleteUser(username: string): void {
   const users = loadUsers();
-  if (!users.some((u) => u.username === username)) throw new Error('No such user.');
-  if (users.length <= 1) throw new Error('Cannot delete the last user.');
+  if (!users.some((u) => u.username === username)) throw new InputError('No such user.', 404);
+  if (users.length <= 1) throw new InputError('Cannot delete the last user.');
   saveUsers(users.filter((u) => u.username !== username));
   destroyUserSessions(username, null);
   // Transcripts are kept deliberately - deleting an account should not silently
@@ -137,7 +138,7 @@ export async function setUserPassword(username: string, password: string): Promi
   const hash = await hashPassword(password); // await first, then read-modify-write
   const users = loadUsers();
   const u = users.find((x) => x.username === username);
-  if (!u) throw new Error('No such user.');
+  if (!u) throw new InputError('No such user.', 404);
   u.password = hash;
   saveUsers(users);
 }

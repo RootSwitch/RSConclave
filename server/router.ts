@@ -1,5 +1,6 @@
 // Minimal method+path router with JSON body handling.
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { InputError } from './errors.ts';
 
 export type Handler = (
   req: IncomingMessage,
@@ -64,11 +65,13 @@ export function sendJson(res: ServerResponse, status: number, obj: unknown): voi
   res.end(body);
 }
 
-export class HttpError extends Error {
-  status: number;
+/**
+ * An InputError with the status first, kept because every route already reads
+ * that way. Anything thrown as either lands on its own status; see errors.ts.
+ */
+export class HttpError extends InputError {
   constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
+    super(message, status);
   }
 }
 
@@ -113,7 +116,9 @@ export async function dispatch(req: IncomingMessage, res: ServerResponse): Promi
     try {
       await r.handler(req, res, params, url.searchParams);
     } catch (err: any) {
-      const status = err instanceof HttpError ? err.status : 500;
+      // InputError covers HttpError too. Anything else really is our fault and
+      // stays a 500 - mapping unknown throws to 400 would hide real bugs.
+      const status = err instanceof InputError ? err.status : 500;
       if (!res.headersSent) sendJson(res, status, { error: err?.message ?? 'internal error' });
       else res.end();
     }

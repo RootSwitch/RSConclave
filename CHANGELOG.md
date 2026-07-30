@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Bad requests answer 400/404/409 instead of 500.** "Pick an endpoint and
+  model", "that username already exists" and "session not found" all came back
+  as 500, which says the server is broken and retrying might help - so a typo in
+  a request looked identical to a real fault, in the browser and in the logs.
+  Everything the engine and auth reject for bad input now carries the class of
+  the failure: 400 for malformed input, 404 for something missing, 409 for the
+  wrong state (the box is busy, a generation is already running). Anything else
+  still returns 500, deliberately - mapping unknown throws to 400 would hide
+  genuine bugs.
+
+  Two of those 500s were real crashes rather than mislabelled rejections:
+  `inject` with a JSON number for `text` reached `.trim` and threw TypeError
+  (optional chaining guards null, not a number), and a non-numeric
+  `stageIndex` became NaN, which compares false against every bound and was
+  handed to the engine as a stage index. Both are validated at the boundary now.
+
 - **"Partial output kept" now means one thing everywhere.** A cancelled reply
   was context in the roundtable and in the council's consolidator but not in
   chat, council follow-ups or a pipeline stage, while the badge said the same

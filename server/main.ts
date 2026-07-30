@@ -1,5 +1,6 @@
 // RSConclave server entry point. Run: node server/main.ts   (or node --watch during dev)
 import http from 'node:http';
+import { requireText, InputError } from './errors.ts';
 import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -437,6 +438,16 @@ route('PATCH', '/api/sessions/:id', async (req, res, params) => {
   sendJson(res, 200, { ok: true });
 });
 
+/**
+ * A non-negative integer from request input. Number('abc') is NaN, which then
+ * compared false against every bound and reached the engine as a stage index.
+ */
+function requireIndex(value: unknown, label: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) throw new InputError(`${label} must be a non-negative whole number`);
+  return n;
+}
+
 // --- council ---
 route('POST', '/api/council/start', async (req, res) => {
   const config = await readJsonBody(req);
@@ -444,7 +455,7 @@ route('POST', '/api/council/start', async (req, res) => {
 });
 route('POST', '/api/council/rerun-member', async (req, res) => {
   const { sessionId, memberIndex } = await readJsonBody(req);
-  engine.rerunMember(userOf(req), sessionId, Number(memberIndex));
+  engine.rerunMember(userOf(req), sessionId, requireIndex(memberIndex, 'memberIndex'));
   sendJson(res, 200, { ok: true });
 });
 route('POST', '/api/council/consolidate', async (req, res) => {
@@ -455,7 +466,7 @@ route('POST', '/api/council/consolidate', async (req, res) => {
 });
 route('POST', '/api/council/followup', async (req, res) => {
   const { sessionId, prompt } = await readJsonBody(req);
-  engine.councilFollowup(userOf(req), sessionId, String(prompt ?? ''));
+  engine.councilFollowup(userOf(req), sessionId, requireText(prompt, 'follow-up prompt'));
   sendJson(res, 200, { ok: true });
 });
 
@@ -471,13 +482,14 @@ route('POST', '/api/roundtable/step', async (req, res) => {
 });
 route('POST', '/api/roundtable/inject', async (req, res) => {
   const { text, as } = await readJsonBody(req);
-  if (!text?.trim()) throw new HttpError(400, 'text required');
-  engine.inject(userOf(req), String(text), as === 'user' ? 'user' : 'narrator');
+  // requireText, not `text?.trim()`: optional chaining passes a JSON number
+  // straight through to .trim and the TypeError surfaced as a 500.
+  engine.inject(userOf(req), requireText(text, 'text'), as === 'user' ? 'user' : 'narrator');
   sendJson(res, 200, { ok: true });
 });
 route('POST', '/api/roundtable/human-turn', async (req, res) => {
   const { participantId, text } = await readJsonBody(req);
-  engine.humanTurn(userOf(req), String(participantId ?? ''), String(text ?? ''));
+  engine.humanTurn(userOf(req), String(participantId ?? ''), requireText(text, 'text'));
   sendJson(res, 200, { ok: true });
 });
 route('POST', '/api/roundtable/consolidate', async (req, res) => {
@@ -506,7 +518,7 @@ route('POST', '/api/chat/start', async (req, res) => {
 });
 route('POST', '/api/chat/send', async (req, res) => {
   const { text } = await readJsonBody(req);
-  engine.chatSend(userOf(req), String(text ?? ''));
+  engine.chatSend(userOf(req), requireText(text, 'message'));
   sendJson(res, 200, { ok: true });
 });
 route('POST', '/api/chat/continue', (req, res) => {
@@ -525,7 +537,7 @@ route('POST', '/api/pipeline/start', async (req, res) => {
 });
 route('POST', '/api/pipeline/rerun', async (req, res) => {
   const { sessionId, stageIndex } = await readJsonBody(req);
-  engine.rerunPipelineFrom(userOf(req), sessionId, Number(stageIndex));
+  engine.rerunPipelineFrom(userOf(req), sessionId, requireIndex(stageIndex, 'stageIndex'));
   sendJson(res, 200, { ok: true });
 });
 

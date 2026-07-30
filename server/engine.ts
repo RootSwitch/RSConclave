@@ -29,6 +29,7 @@ import * as chat from './chat.ts';
 import { renderTranscriptText } from './text.ts';
 import { estimateMessages, OLLAMA_DEFAULT_NUM_CTX } from './tokens.ts';
 import { broadcast } from './sse.ts';
+import { InputError } from './errors.ts';
 
 interface Active {
   owner: string;
@@ -76,7 +77,9 @@ function endpointById(id: string, session?: Session): Endpoint {
     : undefined;
   if (viaSession) return viaSession;
   if (eps.length === 1) return eps[0];
-  throw new Error(
+  // A configuration problem, not a fault of ours - so it reads as a 4xx when it
+  // reaches a request directly rather than through a background run.
+  throw new InputError(
     eps.length
       ? `endpoint "${id}" no longer exists - pick a current one in Settings`
       : 'no inference endpoints are configured - add one in Settings',
@@ -222,14 +225,14 @@ function releaseActive(username: string): void {
 
 function assertIdle(): void {
   if (active && active.phase === 'generating') {
-    throw new Error('the box is busy with a generation - try again when it finishes');
+    throw new InputError('the box is busy with a generation - try again when it finishes', 409);
   }
 }
 
 /** The active run, and it must be yours. */
 function assertOwn(username: string): Active {
-  if (!active) throw new Error('no active run');
-  if (active.owner !== username) throw new Error('the box is running another user\'s session');
+  if (!active) throw new InputError('no active run', 409);
+  if (active.owner !== username) throw new InputError('the box is running another user\'s session', 409);
   return active;
 }
 
@@ -375,9 +378,9 @@ export function startCouncil(username: string, config: CouncilConfig): string {
   // Validate BEFORE displacing anything. takeover() clears another user's
   // parked run, so a request that then threw on its own bad config destroyed
   // someone else's session and accomplished nothing.
-  if (!config?.members?.length) throw new Error('no council members selected');
-  if (!config.consolidator?.model) throw new Error('no consolidator selected');
-  if (typeof config.prompt !== 'string' || !config.prompt.trim()) throw new Error('prompt is empty');
+  if (!config?.members?.length) throw new InputError('no council members selected');
+  if (!config.consolidator?.model) throw new InputError('no consolidator selected');
+  if (typeof config.prompt !== 'string' || !config.prompt.trim()) throw new InputError('prompt is empty');
   releaseActive(username);
   takeover(username);
   const session: Session = {
@@ -481,7 +484,7 @@ export function rerunMember(username: string, sessionId: string, memberIndex: nu
   const a = requireSession(username, sessionId);
   const config = a.session.config as CouncilConfig;
   const m = config.members[memberIndex];
-  if (!m) throw new Error(`no member at index ${memberIndex}`);
+  if (!m) throw new InputError(`no member at index ${memberIndex}`, 404);
   launch(async () => {
     await runTurn(a, {
       member: m,
@@ -515,9 +518,9 @@ export function consolidate(username: string, sessionId: string, template?: stri
 /** Follow-up round: every member answers a new prompt with their own history as context. */
 export function councilFollowup(username: string, sessionId: string, prompt: string): void {
   assertIdle();
-  if (!prompt?.trim()) throw new Error('follow-up prompt is empty');
+  if (!prompt?.trim()) throw new InputError('follow-up prompt is empty');
   const a = requireSession(username, sessionId);
-  if (a.session.mode !== 'council') throw new Error('not a council session');
+  if (a.session.mode !== 'council') throw new InputError('not a council session');
   a.phase = 'generating';
   a.session.status = 'active';
   a.pauseRequested = false;
@@ -528,9 +531,9 @@ export function councilFollowup(username: string, sessionId: string, prompt: str
 /** Load one of the user's stored sessions as the active run. */
 function requireSession(username: string, sessionId: string): Active {
   if (active && active.owner === username && active.session.id === sessionId) return active;
-  if (active && active.phase === 'generating') throw new Error('the box is busy with a generation - try again when it finishes');
+  if (active && active.phase === 'generating') throw new InputError('the box is busy with a generation - try again when it finishes', 409);
   const session = store.loadSession<Session>(username, sessionId);
-  if (!session) throw new Error('session not found');
+  if (!session) throw new InputError('session not found', 404);
   releaseActive(username);
   takeover(username);
   session.status = 'active';
@@ -552,7 +555,7 @@ export function startRoundtable(username: string, config: RoundtableConfig): str
   assertIdle();
   // Validated before takeover - see startCouncil.
   if (!config?.participants?.length || config.participants.length < 2) {
-    throw new Error('need at least 2 participants');
+    throw new InputError('need at least 2 participants');
   }
   releaseActive(username);
   takeover(username);
@@ -592,8 +595,8 @@ export function resumeSession(username: string, sessionId: string): Session {
 
 export function step(username: string, nextParticipantId?: string, auto?: number): void {
   const a = assertOwn(username);
-  if (a.session.mode !== 'roundtable') throw new Error('not a roundtable session');
-  if (a.phase === 'generating') throw new Error('a generation is already running');
+  if (a.session.mode !== 'roundtable') throw new InputError('not a roundtable session');
+  if (a.phase === 'generating') throw new InputError('a generation is already running', 409);
   a.pauseRequested = false;
   // Capped: an uncapped count let one request hold the box indefinitely
   // (`{auto: 1e9}`), and no plausible roundtable needs more than this in one go.
@@ -647,12 +650,12 @@ async function roundtableLoop(firstParticipantId?: string): Promise<void> {
 /** A human participant speaks their turn. */
 export function humanTurn(username: string, participantId: string, text: string): void {
   const a = assertOwn(username);
-  if (a.session.mode !== 'roundtable') throw new Error('not a roundtable session');
-  if (a.phase === 'generating') throw new Error('wait for the current turn to finish');
-  if (!text?.trim()) throw new Error('text is empty');
+  if (a.session.mode !== 'roundtable') throw new InputError('not a roundtable session');
+  if (a.phase === 'generating') throw new InputError('wait for the current turn to finish', 409);
+  if (!text?.trim()) throw new InputError('text is empty');
   const config = a.session.config as RoundtableConfig;
   const p = config.participants.find((x) => x.id === participantId);
-  if (!p) throw new Error('unknown participant');
+  if (!p) throw new InputError('unknown participant', 404);
   addEntry({ kind: 'participant', speaker: p.name, participantId: p.id, text: text.trim() });
   pushState();
 }
@@ -666,9 +669,9 @@ export function consolidateRoundtable(
 ): void {
   assertIdle();
   const a = requireSession(username, sessionId);
-  if (a.session.mode !== 'roundtable') throw new Error('not a roundtable session');
+  if (a.session.mode !== 'roundtable') throw new InputError('not a roundtable session');
   const transcript = renderTranscriptText(a.session.entries);
-  if (!transcript) throw new Error('nothing to consolidate yet');
+  if (!transcript) throw new InputError('nothing to consolidate yet');
   const prompt = template.includes('{{TRANSCRIPT}}')
     // Function replacement - a transcript is the most $-laden text in the app.
     ? template.replaceAll('{{TRANSCRIPT}}', () => transcript)
@@ -688,7 +691,7 @@ export function consolidateRoundtable(
 
 export function inject(username: string, text: string, as: 'narrator' | 'user'): void {
   const a = assertOwn(username);
-  if (a.phase === 'generating') throw new Error('wait for the current turn to finish');
+  if (a.phase === 'generating') throw new InputError('wait for the current turn to finish', 409);
   addEntry({
     kind: as === 'narrator' ? 'narrator' : 'user',
     speaker: as === 'narrator' ? 'Narrator' : 'User',
@@ -699,12 +702,12 @@ export function inject(username: string, text: string, as: 'narrator' | 'user'):
 
 export function rerollLast(username: string): void {
   const a = assertOwn(username);
-  if (a.session.mode !== 'roundtable') throw new Error('not a roundtable session');
-  if (a.phase === 'generating') throw new Error('a generation is already running');
+  if (a.session.mode !== 'roundtable') throw new InputError('not a roundtable session');
+  if (a.phase === 'generating') throw new InputError('a generation is already running', 409);
   const entries = a.session.entries;
   let idx = entries.length - 1;
   while (idx >= 0 && entries[idx].kind !== 'participant' && entries[idx].kind !== 'error') idx--;
-  if (idx < 0) throw new Error('nothing to reroll');
+  if (idx < 0) throw new InputError('nothing to reroll');
   // Splice returns everything from idx onward. Broadcasting only removed[0]
   // left any trailing narrator/user injection visible in the browser while it
   // was already gone from disk - reroll after an inject silently diverged.
@@ -719,7 +722,7 @@ export function rerollLast(username: string): void {
 
 export function startChat(username: string, config: ChatConfig): string {
   assertIdle();
-  if (!config?.model || !config.endpointId) throw new Error('pick an endpoint and model');
+  if (!config?.model || !config.endpointId) throw new InputError('pick an endpoint and model');
   releaseActive(username);
   takeover(username);
   const session: Session = {
@@ -750,9 +753,9 @@ export function startChat(username: string, config: ChatConfig): string {
 /** Append the user's message and immediately generate a reply. */
 export function chatSend(username: string, text: string): void {
   const a = assertOwn(username);
-  if (a.session.mode !== 'chat') throw new Error('not a chat session');
-  if (a.phase === 'generating') throw new Error('a generation is already running');
-  if (!text?.trim()) throw new Error('message is empty');
+  if (a.session.mode !== 'chat') throw new InputError('not a chat session');
+  if (a.phase === 'generating') throw new InputError('a generation is already running', 409);
+  if (!text?.trim()) throw new InputError('message is empty');
   addEntry({ kind: 'user', speaker: 'You', text: text.trim() });
   // first message names the session, so the sidebar is readable
   if (a.session.entries.filter((e) => e.kind === 'user').length === 1) {
@@ -764,12 +767,12 @@ export function chatSend(username: string, text: string): void {
 /** Drop the last reply and generate a fresh one for the same message. */
 export function chatRegenerate(username: string): void {
   const a = assertOwn(username);
-  if (a.session.mode !== 'chat') throw new Error('not a chat session');
-  if (a.phase === 'generating') throw new Error('a generation is already running');
+  if (a.session.mode !== 'chat') throw new InputError('not a chat session');
+  if (a.phase === 'generating') throw new InputError('a generation is already running', 409);
   const entries = a.session.entries;
   let idx = entries.length - 1;
   while (idx >= 0 && entries[idx].kind === 'user') idx--;
-  if (idx < 0) throw new Error('nothing to regenerate');
+  if (idx < 0) throw new InputError('nothing to regenerate');
   const removed = entries.splice(idx);
   persist();
   for (const e of removed) broadcast('remove-entry', { entryId: e.id }, a.owner);
@@ -855,9 +858,9 @@ async function runPipeline(fromStage: number): Promise<void> {
 export function rerunPipelineFrom(username: string, sessionId: string, stageIndex: number): void {
   assertIdle();
   const a = requireSession(username, sessionId);
-  if (a.session.mode !== 'pipeline') throw new Error('not a pipeline session');
+  if (a.session.mode !== 'pipeline') throw new InputError('not a pipeline session');
   const config = a.session.config as PipelineConfig;
-  if (stageIndex < 0 || stageIndex >= config.stages.length) throw new Error('bad stage index');
+  if (stageIndex < 0 || stageIndex >= config.stages.length) throw new InputError('bad stage index');
   a.phase = 'generating';
   a.session.status = 'active';
   a.pauseRequested = false;
@@ -896,9 +899,9 @@ export function stopRun(username: string): void {
 export function forkSession(username: string, sessionId: string, entryId: string): Session {
   assertIdle();
   const source = store.loadSession<Session>(username, sessionId);
-  if (!source) throw new Error('session not found');
+  if (!source) throw new InputError('session not found', 404);
   const cut = source.entries.findIndex((e) => e.id === entryId);
-  if (cut < 0) throw new Error('that entry is not part of this session');
+  if (cut < 0) throw new InputError('that entry is not part of this session', 404);
 
   const copy = structuredClone(source) as Session;
   copy.id = store.newId();
@@ -931,13 +934,13 @@ export function forkSession(username: string, sessionId: string, entryId: string
  */
 export function chatContinue(username: string): void {
   const a = assertOwn(username);
-  if (a.session.mode !== 'chat') throw new Error('not a chat session');
-  if (a.phase === 'generating') throw new Error('a generation is already running');
+  if (a.session.mode !== 'chat') throw new InputError('not a chat session');
+  if (a.phase === 'generating') throw new InputError('a generation is already running', 409);
   const last = a.session.entries.at(-1);
   // A cancelled partial is continuable - that is the point of keeping it. Any
   // other error is not: there is nothing coherent to continue from.
   if (!last || last.kind !== 'participant' || (last.error && last.error !== 'cancelled') || !last.text.trim()) {
-    throw new Error('there is no reply to continue');
+    throw new InputError('there is no reply to continue');
   }
   const config = a.session.config as ChatConfig;
   launch(async () => {
@@ -980,7 +983,7 @@ export function setTags(username: string, sessionId: string, tags: string[]): vo
     return;
   }
   const s = store.loadSession<Session>(username, sessionId);
-  if (!s) throw new Error('session not found');
+  if (!s) throw new InputError('session not found', 404);
   s.tags = tags.length ? tags : undefined;
   store.saveSession(username, s);
 }
