@@ -1,8 +1,8 @@
 # RSConclave - Multi-Model Workflows for Local LLMs
 
-> A self-hosted web UI for local LLMs that does natively what most chat clients make you
-> do by hand: one prompt to several models with another consolidating the answers, or two
-> models arguing a question out turn by turn - no dependencies, no build step, no telemetry.
+> Send one prompt to several models and have another consolidate the answers. Or seat two
+> models at a roundtable and let them argue it out, turn by turn. A self-hosted web UI for
+> local LLMs - no dependencies, no build step, no telemetry.
 
 RSConclave runs as a container next to your inference box rather than as an app on one
 machine, so the same sessions, personas and history are there from your desktop or your phone.
@@ -23,10 +23,23 @@ real, but this belongs on a LAN or behind a VPN, not on the open internet
 negotiate a settlement. Every seat is its own model plus persona, and the gate bar under the
 transcript decides who speaks next - Step for one turn, Auto xN to let them run.*
 
-That is possible because Node runs the TypeScript server directly via type stripping and the
-frontend is vanilla HTML/JS/CSS - there is nothing to compile and nothing to install.
+The no-dependencies claim is literal: Node runs the TypeScript server directly via type
+stripping and the frontend is vanilla HTML/JS/CSS - nothing to compile, nothing to install.
 
-## The four modes
+## At a glance
+
+- **Chat** - a plain 1:1 conversation with one model.
+- **Council of Elders** - one prompt to a sequence of models, then a *consolidator* model
+  synthesizes their labeled answers. Add a ballot and the votes are tallied above the prose.
+- **Roundtable** - two or more seats take turns in one shared conversation, gated by you.
+  A seat can be a model, or it can be you.
+- **Pipeline** - chain stages, each stage's template receiving the previous stage's output.
+
+What carries across all four: **personas** are written once and layered onto any seat, models
+are **discovered from the endpoint** rather than typed, any session **forks** from any message,
+and every transcript **exports** as markdown.
+
+## The four modes in detail
 
 - **Chat** - a plain 1:1 conversation with one model, using the same discovery, per-seat
   `num_ctx`, context metering and streaming as everything else. Enter sends, Shift+Enter
@@ -96,7 +109,7 @@ rather than an afternoon. Your own data is untouched: the server runs against a 
 `mktemp` directory.
 
 **Council of Elders** - one prompt out to four models, then a consolidator reads all four
-labelled answers and rules on them. Ballot mode is on here, so the tally sits above the
+labeled answers and rules on them. Ballot mode is on here, so the tally sits above the
 prose; note that the consolidation disagrees with the dissenter on *grounds*, not just on the
 verdict. Theme: Parchment.
 
