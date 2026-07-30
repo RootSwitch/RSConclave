@@ -242,7 +242,11 @@ const Roundtable = {
       ctx: ctxInput(preset?.params?.num_ctx),
       overlay: el('textarea', {
         rows: 2,
-        placeholder: 'Role overlay, added after the persona. e.g. "You are the defence" or "You are the CFO and you care about payback period"',
+        // No example here on purpose. The Ideas fold below now does the "what is
+        // this for" work, and any single example narrowed the whole mode to
+        // whatever domain it came from.
+        placeholder: 'Role overlay - what makes this seat different from the persona alone',
+        title: 'Each seat gets a layered system prompt: framing, then the persona, then this, then the scenario. Use this to narrow a general persona to one side, role or stake.',
       }),
     };
     if (preset?.personaId) els.persona.value = preset.personaId;

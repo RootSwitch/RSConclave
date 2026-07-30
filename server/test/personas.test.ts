@@ -20,6 +20,17 @@ test('default personas: ship an opposing pair, which is what makes a roundtable 
   assert.ok(names.includes('Advocate'));
 });
 
+// The second pair: same goal, opposite method. Asserted so a future tidy-up of
+// the persona list cannot quietly drop half of it and leave the pairing broken.
+test('default personas: ship a teaching pair that disagrees about method', () => {
+  const names = DEFAULT_PERSONAS.map((p) => p.name);
+  assert.ok(names.includes('Plain Explainer'));
+  assert.ok(names.includes('Socratic Tutor'));
+  const tutor = DEFAULT_PERSONAS.find((p) => p.name === 'Socratic Tutor')!;
+  // Its whole value is the refusal, so check the prompt actually states it.
+  assert.match(tutor.systemPrompt, /never state the answer/i);
+});
+
 test('default personas: resolve through the normal persona lookup', () => {
   const dm = DEFAULT_PERSONAS.find((p) => p.name === 'Dungeon Master')!;
   const sys = buildSystemPrompt(

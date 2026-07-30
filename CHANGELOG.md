@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **A Socratic Tutor persona, and one fewer example in the roundtable form.**
+  The tutor teaches only by asking and is forbidden from confirming an answer
+  even when the student is one step away, which makes it the second deliberate
+  pair in the set: Plain Explainer and Socratic Tutor want the same outcome by
+  opposite methods, the way Skeptic and Advocate hold opposing stances. Put
+  them on facing seats and the roundtable argues about how to teach.
+
+  The role-overlay field lost its example entirely rather than gaining a better
+  one. The Ideas fold underneath now does the "what is this for" work, and any
+  single example narrowed the mode to whatever domain it came from - which is
+  the problem the fold was added to solve. The placeholder explains the field
+  instead, and the tooltip spells out the layering (framing, persona, overlay,
+  scenario).
+
 - **The roundtable stopped implying it was a tabletop tool.** Every example in
   the setup form pointed the same way: the seat name suggested "DM", the role
   overlay suggested "You are the Dungeon Master", and the scenario field asked
@@ -341,8 +355,9 @@
   offered a roundtable of you talking to yourself with no explanation. Chat
   and Council already warned; these two were silent.
 
-- **Six example personas ship by default.** Skeptic, Advocate, Code
-  Reviewer, Dungeon Master, Plain Explainer and Terse Analyst appear in an
+- **Seven example personas ship by default.** Skeptic, Advocate, Code
+  Reviewer, Dungeon Master, Plain Explainer, Socratic Tutor and Terse Analyst
+  appear in an
   account that has never saved a persona - examples teach the feature
   faster than placeholder text, and each is written as a behavioural rule
   ("name the check and wait for a result") rather than an adjective,

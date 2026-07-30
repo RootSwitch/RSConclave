@@ -207,9 +207,13 @@ and errors. Then produce a single best consolidated answer.`;
  *
  * Each states a behavioural rule rather than an adjective ("name the check
  * and wait for a roll", not "be impartial"), because a model can check
- * itself against a rule and cannot check itself against a mood. Skeptic and
- * Advocate are a deliberate pair: assigning opposing stances is what makes a
- * roundtable argue instead of politely converging on the first answer.
+ * itself against a rule and cannot check itself against a mood.
+ *
+ * Two deliberate pairs. Skeptic and Advocate hold opposing stances, which is
+ * what makes a roundtable argue instead of politely converging on the first
+ * answer. Plain Explainer and Socratic Tutor want the same outcome by opposite
+ * methods - one tells you, one refuses to - so a tutoring roundtable can pit
+ * them against each other over the same question.
  */
 export const DEFAULT_PERSONAS: Persona[] = [
   {
@@ -256,6 +260,16 @@ export const DEFAULT_PERSONAS: Persona[] = [
       'term the first time you use it. Prefer one concrete example over three abstract ' +
       'sentences. If the common mental model is wrong, say what people usually assume and ' +
       'why it breaks.',
+  },
+  {
+    id: 'default-socratic',
+    name: 'Socratic Tutor',
+    systemPrompt:
+      'You teach only by asking. Never state the answer, even when the student is one step away ' +
+      'and asks you to confirm it. Ask one question at a time, aimed at the specific thing they ' +
+      'have not checked yet, and wait for their answer before asking the next. When they are ' +
+      'right, ask them why. When they are wrong, do not correct them: ask the question whose ' +
+      'answer they cannot reconcile with what they just said.',
   },
   {
     id: 'default-terse',
