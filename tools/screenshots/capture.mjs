@@ -26,7 +26,14 @@ const SHOTS = [
   { mode: 'roundtable', theme: 'synthwave', file: 'roundtable.png', scroll: 'bottom' },
   { mode: 'council',    theme: 'parchment', file: 'council.png' },
   { mode: 'pipeline',   theme: 'blueprint', file: 'pipeline.png' },
-  { mode: 'chat',       theme: 'amber',     file: 'chat.png' },
+  /*
+   * Resumed first, because only one session can be the active run and the
+   * roundtable above is holding it. Without this the chat shot showed "not the
+   * active session - use Resume to continue it" where the compose box belongs,
+   * so the one mode whose whole point is a message box did not show one. Safe
+   * here specifically because the roundtable was already captured.
+   */
+  { mode: 'chat',       theme: 'amber',     file: 'chat.png', resume: true },
 ];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -64,6 +71,25 @@ async function evaluate(expression, awaitPromise = false) {
   return r.result?.value;
 }
 
+/*
+ * Poll an expression until it is truthy.
+ *
+ * The fixed sleeps this replaces were fine three times out of four and then the
+ * fourth shot failed with an empty sidebar - the list simply had not rendered
+ * yet. A rig that regenerates the README images is worth nothing if refreshing
+ * them is a coin toss, so the waits are now conditions rather than guesses.
+ */
+async function waitFor(expression, label, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    last = await evaluate(expression);
+    if (last) return last;
+    await sleep(150);
+  }
+  throw new Error(`timed out waiting for ${label} (last value: ${JSON.stringify(last)})`);
+}
+
 await send('Page.enable');
 await send('Runtime.enable');
 await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
@@ -72,7 +98,7 @@ await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceSc
 // for a real browser. Simpler than forging one with Network.setCookie, and it
 // exercises the actual login path.
 await send('Page.navigate', { url: APP });
-await sleep(1500);
+await waitFor(`!!document.getElementById('session-list')`, 'the app shell');
 const status = await evaluate(
   `fetch('/api/login',{method:'POST',headers:{'content-type':'application/json'},` +
   `body:JSON.stringify({username:${JSON.stringify(USER)},password:${JSON.stringify(PASS)}})}).then(r=>r.status)`, true);
@@ -93,11 +119,31 @@ fs.mkdirSync(OUT, { recursive: true });
 for (const shot of SHOTS) {
   await evaluate(`localStorage.setItem('rsconclave.theme', ${JSON.stringify(shot.theme)})`);
   await send('Page.reload');
-  await sleep(2200);
+  // The sidebar is fetched after load, so its contents are the signal that the
+  // page is ready to be driven - not the elapsed time since reload.
+  await waitFor(`document.querySelectorAll('#session-list li').length >= ${SHOTS.length}`,
+    `${shot.mode}: the session list to populate`);
 
   const found = await evaluate(clickSession(shot.mode));
   if (found !== 'ok') throw new Error(`${shot.mode}: ${found}`);
-  await sleep(1200);
+  // Opening a session is another round trip; wait for its view to be on screen.
+  await waitFor(`(() => {
+    const v = document.getElementById('view-${shot.mode}');
+    return !!v && v.offsetParent !== null && v.textContent.trim().length > 0;
+  })()`, `${shot.mode}: its view to render`);
+  await sleep(600); // let streaming-free renders settle (fonts, folds, badges)
+
+  if (shot.resume) {
+    const clicked = await evaluate(`(() => {
+      const b = [...document.querySelectorAll('#view-${shot.mode} button')].find(x => x.textContent.trim() === 'Resume');
+      if (!b) return 'no Resume button';
+      b.click();
+      return 'ok';
+    })()`);
+    if (clicked !== 'ok') throw new Error(`${shot.mode}: ${clicked}`);
+    await waitFor(`!!document.querySelector('#view-${shot.mode} textarea')`,
+      `${shot.mode}: the compose box after Resume`);
+  }
 
   // Close any open setup band so the transcript is what the eye lands on.
   await evaluate(`document.querySelectorAll('details[open].setup-fold').forEach(d => d.open = false); 1`);
