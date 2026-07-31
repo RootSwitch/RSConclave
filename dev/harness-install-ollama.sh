@@ -94,6 +94,13 @@ EOF
 cat > "$BIN/rocminfo" <<'EOF'
 #!/bin/sh
 [ -n "${STUB_NO_ROCMINFO:-}" ] && exit 127
+# Verbatim from a real RX 9060 XT with no matching amdrocm*-gfx1200 package.
+if [ -n "${STUB_ROCM_UNKNOWN:-}" ]; then
+  echo "ROCk module is loaded"
+  echo "Warning: Agent creation failed." >&2
+  echo "The GPU node has an unrecognized id." >&2
+  exit 0
+fi
 echo "  Name:                    gfx000"
 echo "  Marketing Name:          Stub CPU Agent"
 echo "  Name:                    ${STUB_GFX:-gfx1100}"
@@ -168,10 +175,15 @@ check "rdna2 named" "$(grep -q 'that is RDNA2' "$LOG/out.txt"; echo $?)"
 check "rdna2 told to override" "$(grep -q 'hsa-override 10.3.0' "$LOG/out.txt"; echo $?)"
 
 # rocminfo missing must degrade to the generic list, not crash or go silent.
-rc=$(STUB_PCI=amd STUB_NO_ROCMINFO=1 run)
+# Genuinely removed from PATH: the old stub exited 127 while still being FOUND by
+# `command -v`, so this scenario was exercising "present but broken" and calling
+# it "absent". The two now take different branches, which is what caught it.
+mv "$BIN/rocminfo" "$BIN/rocminfo.off"
+rc=$(STUB_PCI=amd run)
 check "no rocminfo still proceeds" "$([ "$rc" = 0 ]; echo $?)"
 check "no rocminfo says so" "$(grep -q 'gfx target unknown' "$LOG/out.txt"; echo $?)"
 check "no rocminfo lists all families" "$(grep -q 'RDNA4: 12.0.0, RDNA3: 11.0.0, RDNA2: 10.3.0' "$LOG/out.txt"; echo $?)"
+mv "$BIN/rocminfo.off" "$BIN/rocminfo"
 
 # An explicit override must win over any suggestion machinery.
 rc=$(STUB_PCI=amd STUB_GFX=gfx1201 run --hsa-override 12.0.0)
@@ -198,6 +210,15 @@ check "nonsense VRAM does not print a size" "$([ "$(grep -c 'GPU memory: about' 
 # --pull given: the tiny-model hint would be noise, so it must not appear.
 rc=$(STUB_PCI=amd STUB_GFX=gfx1100 run --pull stub:7b)
 check "no tiny-model hint when --pull given" "$([ "$(grep -c 'pull llama3.2:3b' "$LOG/out.txt")" = 0 ]; echo $?)"
+
+echo "=== D2b: rocminfo present but not recognising the card ==="
+# The RDNA4 case Adam hit: ROCk loaded, runtime has no entry for the ASIC.
+rc=$(STUB_PCI=amd STUB_ROCM_UNKNOWN=1 run)
+check "proceeds anyway" "$([ "$rc" = 0 ]; echo $?)"
+check "does NOT claim rocminfo is missing" "$([ "$(grep -c 'rocminfo is not installed' "$LOG/out.txt")" = 0 ]; echo $?)"
+check "says rocminfo ran and found nothing" "$(grep -q 'rocminfo is installed but reported no GPU target' "$LOG/out.txt"; echo $?)"
+check "names the per-target package as the cause" "$(grep -q 'apt-cache search amdrocm' "$LOG/out.txt"; echo $?)"
+check "says an HSA override will not fix it" "$(grep -q 'HSA override will NOT fix this' "$LOG/out.txt"; echo $?)"
 
 echo "=== D4: model directory is always stated ==="
 rc=$(run)

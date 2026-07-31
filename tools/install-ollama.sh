@@ -133,8 +133,9 @@ case "$GPU" in
         # Ollama ships its own ROCm userspace.
         if [ ! -e "${INSTALL_ROOT}/dev/kfd" ]; then
             die "an AMD GPU is present but ${INSTALL_ROOT}/dev/kfd does not exist - the amdgpu compute
-      driver is not ready. Install it first (docs/inference-host.md section 2, the
-      amdgpu-install path), reboot, then run this again. Or pass --gpu cpu."
+      driver is not ready. Install ROCm first (docs/inference-host.md section 2:
+      AMD's apt repo plus the amdrocm*-gfx* package matching YOUR card's target),
+      reboot, then run this again. Or pass --gpu cpu."
         fi
         say "/dev/kfd exists - amdgpu compute is ready"
         # Which card, in ROCm's own terms.
@@ -145,19 +146,37 @@ case "$GPU" in
         # userspace and does not need it - but when present it is the difference
         # between "try these three values" and "try this one".
         GFX=""
+        HAVE_ROCMINFO=0
+        ROCMINFO_OUT=""
         if command -v rocminfo >/dev/null 2>&1; then
+            HAVE_ROCMINFO=1
+            # 2>&1, not 2>/dev/null: when rocminfo cannot identify the card the
+            # reason is on STDERR, and that reason is the whole diagnosis.
+            ROCMINFO_OUT=$(rocminfo 2>&1 || true)
             # `|| true` is load-bearing. This runs under `set -euo pipefail`, and
             # grep exits 1 when it matches nothing - so on any box where rocminfo
-            # is present but says nothing useful (or is a stub, or lists only CPU
-            # agents) the bare assignment ENDED THE SCRIPT, silently, one line
-            # after announcing the driver was ready.
-            GFX=$(rocminfo 2>/dev/null | grep -oE 'gfx[0-9a-f]+' \
+            # is present but says nothing useful the bare assignment ENDED THE
+            # SCRIPT, silently, one line after announcing the driver was ready.
+            GFX=$(printf '%s\n' "$ROCMINFO_OUT" | grep -oE 'gfx[0-9a-f]+' \
                   | grep -vx 'gfx000' | sort -u | tr '\n' ' ' | sed 's/ *$//' || true)
         fi
         if [ -n "$GFX" ]; then
             say "ROCm gfx target(s): $GFX"
-        else
+        elif [ "$HAVE_ROCMINFO" -eq 0 ]; then
             warn "gfx target unknown (rocminfo is not installed - 'apt install rocminfo' to see it)."
+        else
+            # rocminfo IS here and still named no GPU. Saying "rocminfo is not
+            # installed" at this point sends someone to install what they already
+            # have, which is worse than saying nothing.
+            warn "rocminfo is installed but reported no GPU target."
+            if printf '%s' "$ROCMINFO_OUT" | grep -qi 'unrecognized id'; then
+                warn "It says the GPU node has an unrecognized id. The kernel side is fine -"
+                warn "'ROCk module is loaded' means amdgpu is working - but the ROCm USERSPACE"
+                warn "on this box has no entry for this ASIC. AMD ships ROCm as PER-TARGET"
+                warn "packages, so this is normally the wrong one or none at all:"
+                warn "  apt-cache search amdrocm     # then install the one for your card's gfx"
+                warn "See docs/inference-host.md section 2. An HSA override will NOT fix this."
+            fi
         fi
 
         # Newest first: gfx1100 would also match a bare gfx11* pattern, so the
@@ -178,12 +197,15 @@ case "$GPU" in
         else
             case "$GFX_FAM" in
                 RDNA4)
-                    # Deliberately hedged. Whether this works depends on how new
-                    # the ROCm build inside your Ollama is, and that is not
-                    # something this script can inspect.
-                    warn "RDNA4 is recent enough that support depends on the ROCm build bundled"
-                    warn "with your Ollama version. If it reports 'no compatible GPUs' below,"
-                    warn "re-run with --hsa-override ${GFX_SUGGEST}, and if that fails, 11.0.0."
+                    # Hedged deliberately: this depends on the ROCm build inside
+                    # your Ollama, which the script cannot inspect. But the first
+                    # thing to check is the system package, because that is the
+                    # failure people actually hit on RDNA4.
+                    say "RDNA4 has an official per-target ROCm package - make sure the one"
+                    say "installed matches this card (apt-cache search amdrocm)."
+                    warn "If Ollama reports 'no compatible GPUs' below, support also"
+                    warn "depends on the ROCm build bundled with your Ollama version -"
+                    warn "then try --hsa-override ${GFX_SUGGEST}, and if that fails, 11.0.0."
                     ;;
                 RDNA3|CDNA)
                     say "$GFX_FAM is officially supported - an override is usually unnecessary."

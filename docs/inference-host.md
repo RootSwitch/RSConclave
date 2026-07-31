@@ -92,15 +92,54 @@ driver branch that was installed.
 Ollama ships a ROCm build, so you need AMD's kernel driver and ROCm
 userspace, not the whole HIP SDK:
 
+AMD's own docs are the source of truth here and they have been reorganised at
+least once - there is no longer a page called "Quick start install". Find your
+card in their compatibility matrix, which gives you two things you need: the
+**LLVM target** (`gfx1100` for RX 7900 XTX, `gfx1200` for RX 9000) and the
+Ubuntu release and kernel they validate against.
+
+The current shape is an apt repository plus a **per-target** ROCm package:
+
 ```bash
-# Get the current amdgpu-install .deb URL from AMD's ROCm "Quick start
-# install" page for your Ubuntu release - the version in the filename moves.
-sudo apt install -y ./amdgpu-install_VERSION_all.deb
-sudo amdgpu-install --usecase=rocm --no-dkms
-sudo usermod -aG render,video "$USER"   # log out and back in
+sudo apt install -y libatomic1 libquadmath0
+sudo usermod -aG render,video "$LOGNAME"   # log out and back in
+
+sudo mkdir --parents --mode=0755 /etc/apt/keyrings
+wget https://repo.amd.com/rocm/packages-multi-arch/gpg/rocm.gpg -O - \
+    | gpg --dearmor | sudo tee /etc/apt/keyrings/amdrocm.gpg > /dev/null
+sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
+deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages-multi-arch/ubuntu2404 stable main
+EOF
+sudo apt update
+
+# The package name carries BOTH the ROCm version and your card's target.
+# Check what the repo actually offers rather than guessing:
+apt-cache search amdrocm | sort
+sudo apt install -y amdrocm7.14-gfx1100    # gfx1200 for RX 9000, etc.
+
 sudo reboot
-rocm-smi                                # must list the card
+rocminfo | grep -m2 gfx                    # must name your target
 ```
+
+**The per-target package is the part that catches people.** Install the wrong
+one, or none, and the kernel side comes up fine while the runtime does not
+recognise the card:
+
+```
+ROCk module is loaded
+Warning: Agent creation failed.
+The GPU node has an unrecognized id.
+```
+
+That message means userspace has no table entry for your ASIC - `ROCk module
+is loaded` is telling you the kernel driver is working. It is a missing or
+mismatched `amdrocm*-gfx*` package, not a broken driver, and no amount of
+`HSA_OVERRIDE_GFX_VERSION` fixes it.
+
+**Believe AMD's matrix about the kernel, not your instincts about new silicon.**
+RDNA4 is validated on 24.04.4's **GA kernel 6.8**, not an HWE stack - newer
+hardware does not automatically mean you want a newer kernel here, because the
+support arrives through AMD's packages rather than the kernel tree.
 
 Two AMD-specific things that catch people:
 
@@ -378,7 +417,8 @@ with tool access are pointed at it.
 
 1. Ubuntu Server LTS, standard install, OpenSSH yes.
 2. Base packages; `lspci` to identify the card.
-3. Driver: `ubuntu-drivers install --gpgpu` (NVIDIA) or `amdgpu-install
+3. Driver: `ubuntu-drivers install --gpgpu` (NVIDIA) or AMD's repo plus the
+   `amdrocm*-gfx*` package for your card's target (`amdgpu-install
    --usecase=rocm` plus `render`/`video` groups (AMD). Confirm with
    `nvidia-smi` / `rocm-smi`.
 4. Model disk mounted at `/mnt/models`, owned by `ollama`.
