@@ -162,6 +162,10 @@ export interface RunState {
   contextPct?: number; // uncapped - >100 means the window is overflowing
   contextTokens?: number; // estimated prompt tokens for the current/last turn
   contextWindow?: number; // the window those tokens are measured against
+  // Whether that window belongs to a local Ollama box. Only Ollama silently
+  // drops the oldest turns and answers anyway, so only Ollama's overflow
+  // warning can say that. The meter hides entirely when the window is unknown.
+  contextLocal?: boolean;
   lastError?: string;
   // Set only in the state served to NON-owners: the box is mid-generation on
   // someone else's run. Carries no detail about whose or what, on purpose.

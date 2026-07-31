@@ -525,6 +525,21 @@ details[open] summary { margin-bottom: 9px; }
     margin: 0 0 8px;
     overflow-x: auto;
 }
+/* The assembled system prompt, shown verbatim in roundtable setup. Wraps
+   rather than scrolls: this is prose to be read, not code to be copied, and a
+   horizontal scrollbar would hide the end of every sentence. */
+.prompt-preview {
+    background: var(--se-input);
+    border: 1px solid var(--se-border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--se-txt-dim);
+}
 /* fenced blocks: label + copy/save bar attached above the pre */
 .md .md-codeblock { margin: 0 0 8px; }
 .md .md-codebar {

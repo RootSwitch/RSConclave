@@ -158,6 +158,66 @@ console.log('  council status            :', council5?.status);
 check('the dying council did not finish the new chat', st5.phase !== 'done' && chat5?.status !== 'done');
 check('the stopped council stays stopped', council5?.status === 'stopped');
 
+// ---------- EXPERIMENT 6: a cancelled pipeline is not a finished one ----------
+// runPipeline broke out of its stage loop on any entry error without recording
+// that the break was a CANCEL, so finishRun stamped 'done' and the sidebar
+// showed a run the user stopped as if it had completed. Councils had this fixed
+// already; pipelines were missed.
+console.log('\n=== 6. Cancel during a pipeline ===');
+const pl = await api('POST', '/api/pipeline/start', {
+  input: 'probe',
+  stages: [
+    { name: 'one', endpointId: EP, model: 'mock-jester:7b', template: '{{INPUT}}' },
+    { name: 'two', endpointId: EP, model: 'mock-jester:7b', template: '{{INPUT}}' },
+  ],
+});
+await sleep(2500);                       // stage one is streaming
+await api('POST', '/api/cancel', {});
+console.log('  -> cancel sent mid-stage');
+await sleep(4000);                       // let the aborted stage unwind
+const all6 = await api('GET', '/api/sessions');
+const pipe6 = all6.find((s) => s.id === pl.sessionId);
+const disk6 = onDisk('prober', pl.sessionId);
+console.log('  pipeline status (api) :', pipe6?.status);
+console.log('  pipeline status (disk):', disk6.status);
+console.log('  stages produced       :', disk6.entries.filter((e) => e.kind === 'participant').length, 'of 2');
+check('a cancelled pipeline is stopped, not done', pipe6?.status === 'stopped');
+check('the cancel stopped the remaining stages',
+  disk6.entries.filter((e) => e.kind === 'participant' && e.text && !e.error).length < 2);
+
+// ---------- EXPERIMENT 7: a re-run does not rewrite how the session ended ----------
+// Re-running one member edits a council that already reached a terminal status.
+// finishRun used to stamp 'done' regardless, so re-running a member of a council
+// the user had STOPPED silently promoted it to completed.
+console.log('\n=== 7. Re-run a member of a stopped council ===');
+const co3 = await api('POST', '/api/council/start', {
+  prompt: 'probe three',
+  members: [
+    { endpointId: EP, model: 'mock-jester:7b' },
+    { endpointId: EP, model: 'mock-jester:7b' },
+  ],
+  consolidator: { endpointId: EP, model: 'mock-jester:7b', template: '{{RESPONSES}}' },
+});
+await sleep(2500);
+await api('POST', '/api/cancel', {});
+await sleep(4000);
+const before7 = (await api('GET', '/api/sessions')).find((s) => s.id === co3.sessionId);
+console.log('  status after cancel   :', before7?.status);
+/*
+ * Displace it first. The bug only appears once the council is no longer the
+ * live run: re-running a member then reloads it from disk, and reloading
+ * stamps 'active' over the status that said how it ended. Re-running while it
+ * is still in memory happens to work for the wrong reason (the pause flag is
+ * still set), which is exactly the false pass this line exists to avoid.
+ */
+await api('POST', '/api/chat/start', { endpointId: EP, model: 'mock-jester:7b' });
+await api('POST', '/api/council/rerun-member', { sessionId: co3.sessionId, memberIndex: 0 });
+await sleep(8000);                       // let the re-run finish
+const after7 = (await api('GET', '/api/sessions')).find((s) => s.id === co3.sessionId);
+console.log('  status after re-run   :', after7?.status);
+check('the council was stopped to begin with', before7?.status === 'stopped');
+check('a re-run does not promote it to done', after7?.status === 'stopped');
+
 console.log('');
 console.log(failures ? `${failures} check(s) FAILED` : 'all checks passed');
 process.exit(failures ? 1 : 0);

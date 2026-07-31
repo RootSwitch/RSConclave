@@ -144,6 +144,53 @@ const Roundtable = {
 
   /* ---------- setup ---------- */
 
+  /*
+   * Every word this app puts in a model's mouth, on screen.
+   *
+   * Unlike a council - where a member is sent the bare prompt and nothing else
+   * - a roundtable seat is given framing it never asked for: who it is, who
+   * else is here, how other turns are labelled, and not to speak for anyone
+   * else. That framing is what stops the seats blurring into one voice, so it
+   * is not configurable. But a client that silently prepends instructions and
+   * does not show you is how you end up debugging a model that insists it can
+   * search the web, so: not configurable, still visible.
+   *
+   * Fetched from the server on open rather than assembled here, and refetched
+   * every time, so it reflects the form as it stands now and cannot drift from
+   * what the engine will really send.
+   */
+  buildPromptDisclosure() {
+    const body = el('div', { class: 'col' });
+    const details = el('details', { class: 'ideas' },
+      el('summary', {}, 'What each seat is told'),
+      body);
+    details.addEventListener('toggle', async () => {
+      if (!details.open) return;
+      body.replaceChildren(el('span', { class: 'muted' }, 'building…'));
+      try {
+        const config = this.collectConfig();
+        const { prompts } = await Api.rtSystemPrompts(config);
+        if (!prompts.length) {
+          body.replaceChildren(el('span', { class: 'muted' },
+            'Add a participant with a model to see what it will be told.'));
+          return;
+        }
+        body.replaceChildren(
+          el('div', { class: 'muted', style: 'font-size: 12px' },
+            'Sent as the system prompt for that seat, ahead of the conversation. ' +
+            'Built from the framing, then the persona, then the seat overlay, then the ' +
+            'scenario. Human seats send nothing - that is you typing.'),
+          ...prompts.map((p) => el('div', { class: 'col' },
+            el('span', { class: 'badge' }, p.name),
+            el('pre', { class: 'prompt-preview' }, p.prompt))),
+        );
+      } catch (err) {
+        body.replaceChildren(el('span', { class: 'error-text' }, err.message));
+      }
+    });
+    return details;
+  },
+
   buildSetup() {
     this.parts = [];
     this.scenarioEl = el('textarea', {
@@ -175,6 +222,7 @@ const Roundtable = {
       el('button', { onclick: () => this.addPartRow(rowsWrap) }, '+ add participant'),
       el('label', {}, 'Scenario'),
       this.scenarioEl,
+      this.buildPromptDisclosure(),
       /*
        * Collapsed by default so it costs nothing on a phone, where the setup
        * form is already the longest screen in the app. It exists because every

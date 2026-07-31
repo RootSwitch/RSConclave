@@ -19,10 +19,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
-for /f "tokens=1 delims=." %%v in ('node -e "process.stdout.write(process.versions.node)"') do set NODEMAJOR=%%v
-if %NODEMAJOR% LSS 22 (
-    echo Node %NODEMAJOR% is too old: RSConclave runs TypeScript directly, which
-    echo needs the type stripping added in Node 22.18.
+rem The minor matters, not just the major: type stripping landed in 22.18, so
+rem 22.0 through 22.17 pass a major-only test and then fail at the first import
+rem with a syntax error nobody can act on. Let node do the comparison.
+for /f "tokens=1,2 delims=." %%v in ('node -e "process.stdout.write(process.versions.node)"') do (
+    set NODEMAJOR=%%v
+    set NODEMINOR=%%w
+)
+set NODEOK=1
+if %NODEMAJOR% LSS 22 set NODEOK=0
+if %NODEMAJOR% EQU 22 if %NODEMINOR% LSS 18 set NODEOK=0
+if %NODEOK% EQU 0 (
+    echo Node %NODEMAJOR%.%NODEMINOR% is too old: RSConclave runs TypeScript directly,
+    echo which needs the type stripping added in Node 22.18.
     echo.
     echo Install a current version from https://nodejs.org and run this again.
     echo.

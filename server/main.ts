@@ -11,6 +11,7 @@ import { handleSse, onConnectSnapshot } from './sse.ts';
 import { discoverModels, getModelInfo } from './providers.ts';
 import * as store from './store.ts';
 import * as engine from './engine.ts';
+import * as rt from './roundtable.ts';
 import * as auth from './auth.ts';
 import { sessionToMarkdown } from './exportMd.ts';
 import { searchSessions } from './search.ts';
@@ -310,13 +311,24 @@ route('GET', '/api/search', (req, res, _params, query) => {
 
 // --- sessions (always the caller's own; there is no cross-user read) ---
 route('GET', '/api/sessions', (req, res) => {
+  const me = userOf(req);
+  /*
+   * At most one session can be live, and the engine is the only thing that
+   * knows which. 'active' is written to disk and only cleared when another
+   * session displaces it, so a process that exits mid-run leaves that claim
+   * behind forever - after a restart the sidebar showed a session as active
+   * with nothing running at all. Correct it in the projection rather than on
+   * disk: the stored status is what lets a roundtable resume where it was.
+   */
+  const liveId = engine.getActiveSession(me)?.id;
   const sessions = store
-    .listSessions<Session>(userOf(req))
+    .listSessions<Session>(me)
     // tags are part of the projection because the sidebar both shows and filters
     // on them; the list is the only call it makes.
     .map((s) => ({
       id: s.id, title: s.title, mode: s.mode,
-      createdAt: s.createdAt, updatedAt: s.updatedAt, status: s.status, tags: s.tags,
+      createdAt: s.createdAt, updatedAt: s.updatedAt, tags: s.tags,
+      status: s.status === 'active' && s.id !== liveId ? 'paused' : s.status,
     }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   sendJson(res, 200, sessions);
@@ -481,6 +493,31 @@ route('POST', '/api/council/followup', async (req, res) => {
 route('POST', '/api/roundtable/start', async (req, res) => {
   const config = await readJsonBody(req);
   sendJson(res, 200, { sessionId: engine.startRoundtable(userOf(req), config) });
+});
+/*
+ * What each seat will actually be told, for the setup form to show.
+ *
+ * Deliberately computed by the SAME function the engine calls rather than
+ * mirrored in the frontend: a disclosure that drifts from reality is worse
+ * than no disclosure at all, because it is believed. The cost is one round
+ * trip when someone opens the panel.
+ *
+ * Read-only - it runs no model, starts no run, and writes nothing.
+ */
+route('POST', '/api/roundtable/system-prompts', async (req, res) => {
+  const config = await readJsonBody(req);
+  const personas = store.loadUser<Persona[]>(userOf(req), 'personas', DEFAULT_PERSONAS);
+  const participants = Array.isArray(config?.participants) ? config.participants : [];
+  sendJson(res, 200, {
+    prompts: participants
+      // A human seat is a person typing; nothing is sent on their behalf.
+      .filter((p: any) => p?.kind !== 'human')
+      .map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        prompt: rt.buildSystemPrompt(p, config, personas),
+      })),
+  });
 });
 route('POST', '/api/roundtable/step', async (req, res) => {
   const { nextParticipantId, auto } = await readJsonBody(req);

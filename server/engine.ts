@@ -43,6 +43,10 @@ interface Active {
   contextPct?: number;
   contextTokens?: number;
   contextWindow?: number;
+  contextLocal?: boolean;
+  // What this session's status was before it was reopened, so a re-run can put
+  // it back. requireSession stamps 'active' on whatever it loads.
+  resumedStatus?: Session['status'];
   lastError?: string;
 }
 
@@ -116,6 +120,7 @@ export function getState(username: string): RunState {
     contextPct: active.contextPct,
     contextTokens: active.contextTokens,
     contextWindow: active.contextWindow,
+    contextLocal: active.contextLocal,
     lastError: active.lastError,
   };
   if (active.session.mode === 'roundtable' && (active.phase === 'awaiting_gate' || active.phase === 'auto_stepping')) {
@@ -297,13 +302,23 @@ async function runTurn(a: Active, opts: {
   a.lastError = undefined;
   pushState();
 
-  // Measure the prompt against the model's real window (explicit num_ctx beats
-  // the Modelfile's, which beats Ollama's server default).
+  /*
+   * Measure the prompt against the model's real window (explicit num_ctx beats
+   * the Modelfile's, which beats Ollama's server default).
+   *
+   * The 4096 floor is Ollama's server default and belongs ONLY to Ollama.
+   * An openai-compat server (LM Studio, llama.cpp) exposes no /api/show, so
+   * its window is simply unknown - and measuring a llama.cpp server running
+   * 32k against 4096 reported a normal conversation as overflowing, blaming
+   * an Ollama that was not involved. An unknown window is unknown: leave the
+   * meter off rather than invent one.
+   */
   const info = await getModelInfo(ep, opts.member.model);
-  const window = params.num_ctx ?? info?.numCtx ?? OLLAMA_DEFAULT_NUM_CTX;
+  const window = params.num_ctx ?? info?.numCtx ?? (ep.kind === 'ollama' ? OLLAMA_DEFAULT_NUM_CTX : undefined);
   a.contextTokens = estimateMessages(opts.messages);
   a.contextWindow = window;
-  a.contextPct = Math.round((a.contextTokens / window) * 100);
+  a.contextPct = window ? Math.round((a.contextTokens / window) * 100) : undefined;
+  a.contextLocal = ep.kind === 'ollama';
   pushState(); // the context meter can only be filled in once the window is known
 
   /*
@@ -349,7 +364,18 @@ async function runTurn(a: Active, opts: {
     if (a.abort?.signal.aborted) {
       entry.error = 'cancelled';
     } else {
-      entry.kind = 'error';
+      /*
+       * A failed CONTINUE must not condemn the reply it was extending. The
+       * entry already existed and already held text the user had read, so
+       * turning it into an error entry restyled a good answer as a failure.
+       * It stays an assistant turn that is INCOMPLETE - exactly where a
+       * cancelled continuation leaves it, and pressing Continue again clears
+       * the marker either way.
+       *
+       * A fresh turn is the opposite case: the entry exists only for this
+       * attempt, so it IS the error.
+       */
+      if (!baseText) entry.kind = 'error';
       // Keep whatever streamed before the failure (providers attach it), so the
       // final entry event does not blank out text the user already read.
       if (typeof err?.partialText === 'string' && err.partialText) {
@@ -474,7 +500,15 @@ async function runConsolidation(a: Active, template?: string): Promise<void> {
  * then fixed by addressing the run and refusing when it has been displaced -
  * a displaced run's final status was already written by whoever displaced it.
  */
-function finishRun(a: Active): void {
+/*
+ * `keepStatus` is for the re-run paths - re-running one council member, or
+ * redoing the consolidation. Those edit a session that already reached its
+ * terminal status, and the run they represent is not the session's run: a
+ * re-run on a council the user had STOPPED used to quietly promote it to
+ * 'done', and cancelling that re-run used to demote a completed council to
+ * 'stopped'. Neither event says anything about how the council itself ended.
+ */
+function finishRun(a: Active, keepStatus = false): void {
   if (active !== a) return;
   a.phase = 'done';
   /*
@@ -484,7 +518,15 @@ function finishRun(a: Active): void {
    * from one that ran to completion. Chat and roundtable already got this
    * right, via stopRun.
    */
-  a.session.status = a.pauseRequested ? 'stopped' : 'done';
+  if (!keepStatus) {
+    a.session.status = a.pauseRequested ? 'stopped' : 'done';
+  } else {
+    // Reopening a session stamps it 'active', so "leave the status alone" is
+    // not enough on its own - the value to leave alone is already gone by the
+    // time a re-run finishes. Put back what it was.
+    const prior = a.resumedStatus ?? a.session.status;
+    a.session.status = prior === 'active' ? 'done' : prior;
+  }
   persistOf(a);
   pushState();
 }
@@ -502,7 +544,7 @@ export function rerunMember(username: string, sessionId: string, memberIndex: nu
       entrySeed: { kind: 'participant', speaker: m.model, model: m.model, memberIndex },
       keepAlive: config.unloadBetweenModels ? '0' : undefined,
     });
-    finishRun(a);
+    finishRun(a, true);
   });
 }
 
@@ -521,7 +563,7 @@ export function consolidate(username: string, sessionId: string, template?: stri
   }
   launch(async () => {
     await runConsolidation(a, template);
-    finishRun(a);
+    finishRun(a, true);
   });
 }
 
@@ -546,10 +588,12 @@ function requireSession(username: string, sessionId: string): Active {
   if (!session) throw new InputError('session not found', 404);
   releaseActive(username);
   takeover(username);
+  const resumedStatus = session.status;
   session.status = 'active';
   active = {
     owner: username,
     session,
+    resumedStatus,
     abort: null,
     autoRemaining: 0,
     pauseRequested: false,
@@ -896,7 +940,18 @@ async function runPipeline(fromStage: number): Promise<void> {
         memberIndex: i,
       },
     });
-    if (entry.kind === 'error' || entry.error) break; // downstream stages have no input
+    /*
+     * Downstream stages have no input either way, so both cases break - but
+     * they are not the same event. finishRun stamps 'done' unless a pause was
+     * requested, so a pipeline the user explicitly cancelled sat in the
+     * sidebar looking exactly like one that ran to completion. runCouncil
+     * makes the same distinction for the same reason.
+     */
+    if (entry.error === 'cancelled') {
+      a.pauseRequested = true;
+      break;
+    }
+    if (entry.kind === 'error' || entry.error) break;
   }
   finishRun(a);
 }

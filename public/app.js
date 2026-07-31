@@ -905,7 +905,12 @@ function renderStatus() {
     const label = document.getElementById('context-meter-label');
     const base = `~${fmtK(st.contextTokens)} of ${fmtK(st.contextWindow)} ctx (${st.contextPct}%)`;
     if (st.contextPct > 100) {
-      label.textContent = `${base} - OVERFLOWING: Ollama is silently truncating from the top!`;
+      // Only Ollama quietly drops the oldest turns and answers anyway. Another
+      // server's behaviour past its window is its own business, and claiming
+      // otherwise sent people to look at the wrong machine.
+      label.textContent = st.contextLocal
+        ? `${base} - OVERFLOWING: Ollama is silently truncating from the top!`
+        : `${base} - OVER THE LIMIT for this server's context window`;
       label.classList.add('ctx-overflow');
     } else if (st.contextPct >= 90) {
       label.textContent = `${base} - nearly full`;

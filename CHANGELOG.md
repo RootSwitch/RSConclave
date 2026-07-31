@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+**Roundtable setup shows what each seat is actually told.** A council member is
+sent your prompt and nothing else - no system prompt at all, which is the
+point: independent answers have to be uncontaminated by knowing others exist.
+A roundtable seat is the opposite. It is given framing it never asked for - who
+it is, who else is present, how other turns are labelled, and not to write
+anyone else's lines - and that framing is what keeps the seats from blurring
+into one voice. It stays non-configurable for that reason, but "What each seat
+is told" in the setup band now shows the assembled prompt verbatim, layer by
+layer, for every model seat. The panel calls the same function the engine calls
+and refetches on every open, because a disclosure that drifts from what is
+really sent is worse than none: it gets believed.
+
+**The context meter stops blaming Ollama for other servers.** Any endpoint
+without a readable window was measured against Ollama's 4096-token default,
+and an openai-compatible server exposes no /api/show - so a llama.cpp box
+running 32k reported an ordinary conversation as overflowing, and warned that
+Ollama was silently truncating it. An unknown window is now unknown and the
+meter stays out of the way; the Ollama-specific warning only appears for Ollama.
+
+**A cancelled pipeline is no longer filed as a finished one.** Pressing Cancel
+mid-stage broke out of the stage loop without recording that the break was a
+cancel, so the sidebar showed a run the user had stopped as though it had
+completed. Councils were fixed for this once already; pipelines were missed.
+
+**A re-run no longer rewrites how a session ended.** Re-running one council
+member, or redoing a consolidation, stamped the session 'done' whatever it had
+been - so reopening a council you had STOPPED and re-running a member quietly
+promoted it to completed. Reopening a session marks it active, so the prior
+status is now remembered across the reopen. Relatedly, a session left 'active'
+on disk by a process that exited mid-run no longer shows as active in the
+sidebar after a restart, when nothing is running at all.
+
+**A failed Continue no longer condemns the reply it was extending.** A failure
+part-way through a continuation turned the whole entry into an error card,
+restyling an answer the user had already read as a failure. The reply stays
+what it is, marked incomplete - exactly where a cancelled continuation leaves
+it - and continuing again clears the marker.
+
+**The Windows launcher checks Node's minor version**, not just the major. Type
+stripping landed in 22.18, so 22.0 through 22.17 passed the check and then
+failed at the first import with a syntax error nobody could act on.
+
+Found while reviewing RSOperator, a fork of this app, and ported back;
+`dev/probe-runcontrol.mjs` gains two experiments covering the cancel and re-run
+bookkeeping, both of which fail without the fix.
+
 ## 0.1.0 - 2026-07-30
 
 First public release. Everything below is the work that got it here, newest

@@ -72,6 +72,7 @@ const Api = {
   councilFollowup: (sessionId, prompt) => Api._post('/api/council/followup', { sessionId, prompt }),
 
   rtStart: (config) => Api._post('/api/roundtable/start', config),
+  rtSystemPrompts: (config) => Api._post('/api/roundtable/system-prompts', config),
   rtStep: (nextParticipantId, auto) => Api._post('/api/roundtable/step', { nextParticipantId, auto }),
   rtInject: (text, as) => Api._post('/api/roundtable/inject', { text, as }),
   rtReroll: () => Api._post('/api/roundtable/reroll'),
