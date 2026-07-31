@@ -112,6 +112,13 @@ different install paths:
   brings the full graphics stack along with ROCm. Correct if the box also
   drives a display or runs a desktop.
 
+  It also builds an out-of-tree kernel module via DKMS, and **an unsigned
+  module on a Secure Boot machine triggers MOK enrolment mid-install** - a
+  blue key-management screen at the next reboot that has nothing to do with
+  what you thought you were doing. Observed, not theorised. Either turn
+  Secure Boot off first (§1) or take the Compute path, which builds no module
+  and so never raises the question.
+
 Either way the matrix also gives you the two facts worth writing down: your
 card's **LLVM target** (`gfx1100` for RX 7900 XTX, `gfx1200` for RX 9000) and
 the Ubuntu release and kernel AMD validates against.
