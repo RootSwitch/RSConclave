@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+**Changing your password now asks for it twice.** A change signs out every
+other session, so a typo locked you out of a password you never knowingly
+chose - and you found out at the next sign in, not while you were still
+sitting in Settings with a working session. First-run setup already confirmed
+and this did not, which had it backwards: setup is the recoverable one.
+
 **Roundtable setup shows what each seat is actually told.** A council member is
 sent your prompt and nothing else - no system prompt at all, which is the
 point: independent answers have to be uncontaminated by knowing others exist.

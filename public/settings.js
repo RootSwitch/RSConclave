@@ -20,23 +20,43 @@ const Settings = {
   buildAccount() {
     const current = el('input', { type: 'password', placeholder: 'Current password', autocomplete: 'current-password' });
     const next = el('input', { type: 'password', placeholder: 'New password (8+ characters)', autocomplete: 'new-password' });
+    /*
+     * Typed twice, like first-run setup already asks. Not ceremony: changing a
+     * password signs out every other session, so a typo here locks you out of
+     * a password you never knowingly chose, and you find out at the next sign
+     * in rather than now. First-run setup confirmed and this did not, which
+     * had it backwards - setup is the recoverable one.
+     */
+    const confirm = el('input', {
+      type: 'password',
+      placeholder: 'Repeat new password',
+      autocomplete: 'new-password',
+    });
     const msg = el('span', { class: 'muted' });
+    const say = (text, bad) => {
+      msg.textContent = text;
+      msg.className = bad ? 'error-text' : 'muted';
+    };
     const changePassword = async () => {
-      msg.textContent = '';
+      say('');
+      if (next.value !== confirm.value) {
+        say('Passwords do not match.', true);
+        return;
+      }
       try {
         await Api.changePassword(current.value, next.value);
-        current.value = ''; next.value = '';
-        msg.textContent = 'Changed. Other sessions were signed out.';
-      } catch (err) { msg.textContent = err.message; }
+        current.value = ''; next.value = ''; confirm.value = '';
+        say('Changed. Other sessions were signed out.');
+      } catch (err) { say(err.message, true); }
     };
-    onEnterSubmit([current, next], changePassword);
+    onEnterSubmit([current, next, confirm], changePassword);
     return el('div', { class: 'settings-block' },
       el('div', { class: 'row' },
         el('label', {}, `Account: ${App.user}`),
         el('span', { class: 'grow' }),
       ),
       el('div', { class: 'row' },
-        current, next,
+        current, next, confirm,
         el('button', {
           class: 'primary',
           title: 'Other browsers signed in as you are signed out',
