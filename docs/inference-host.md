@@ -93,10 +93,28 @@ Ollama ships a ROCm build, so you need AMD's kernel driver and ROCm
 userspace, not the whole HIP SDK:
 
 AMD's own docs are the source of truth here and they have been reorganised at
-least once - there is no longer a page called "Quick start install". Find your
-card in their compatibility matrix, which gives you two things you need: the
-**LLVM target** (`gfx1100` for RX 7900 XTX, `gfx1200` for RX 9000) and the
-Ubuntu release and kernel they validate against.
+least once - there is no longer a page called "Quick start install". What you
+get instead is a selector, and the answers that matter for an inference box:
+
+| Selector | Choose | Why |
+|---|---|---|
+| Device / Family | **AMD Radeon** | Instinct is the datacentre line, Ryzen the integrated one |
+| Use case | **Compute** | See below - this is the choice that changes everything |
+| OS / version | **Ubuntu**, matching your ISO exactly | Point releases are listed separately; 24.04.4 is not 24.04 |
+
+**"Use case" is the one to get right.** It selects between two genuinely
+different install paths:
+
+- **Compute** - ROCm only, and it lets you pick your specific GPU, which is
+  what produces the per-target package name below. Correct for a headless
+  inference host: the graphics stack is weight you would install and never use.
+- **Mixed Graphics and Compute** - the older `amdgpu-install` flow, which
+  brings the full graphics stack along with ROCm. Correct if the box also
+  drives a display or runs a desktop.
+
+Either way the matrix also gives you the two facts worth writing down: your
+card's **LLVM target** (`gfx1100` for RX 7900 XTX, `gfx1200` for RX 9000) and
+the Ubuntu release and kernel AMD validates against.
 
 The current shape is an apt repository plus a **per-target** ROCm package:
 
