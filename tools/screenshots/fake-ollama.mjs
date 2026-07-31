@@ -15,6 +15,11 @@ import http from 'node:http';
 
 const PORT = Number(process.env.MOCK_PORT ?? 11435);
 
+// MOCK_ONLY="a,b" serves only those models. Lets one script play two different
+// boxes - the static demo runs two instances so its Settings page can show a
+// lab box and a mini box with honestly different model lists.
+const ONLY = (process.env.MOCK_ONLY ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+
 // Real trained context lengths, and a Modelfile num_ctx for each, so the model
 // pickers and the context meter show plausible pills instead of round numbers.
 const MODELS = {
@@ -26,6 +31,10 @@ const MODELS = {
   'llama3.3:70b':           { ctx: 131072, modelfileCtx: 16384 },
   'nemotron-cascade-2:12b': { ctx: 262144, modelfileCtx: 262144 },
 };
+
+const SERVED = Object.fromEntries(
+  Object.entries(MODELS).filter(([name]) => !ONLY.length || ONLY.includes(name)),
+);
 
 // Roundtable seats, keyed by participant name. Each line is written to show the
 // persona doing something a generic reply could not: Inky reverses himself
@@ -152,7 +161,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/api/tags') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ models: Object.keys(MODELS).map((name) => ({ name, size: 2e10 })) }));
+    res.end(JSON.stringify({ models: Object.keys(SERVED).map((name) => ({ name, size: 2e10 })) }));
     return;
   }
 

@@ -17,6 +17,10 @@ this is deliberately not that app. It also assumes a trusted network: the authen
 real, but this belongs on a LAN or behind a VPN, not on the open internet
 ([details](#security-and-data-retention)).
 
+**[Click around the live demo](https://rootswitch.github.io/rsconclave-demo/)** before
+installing anything - the real frontend answered by captured fixtures, with the roundtable
+below already in progress. Nothing runs behind it, so nothing generates; everything else works.
+
 ![A five-seat RSConclave roundtable](docs/img/roundtable.png)
 
 *Five seats, five models, one conversation: Pac-Man and the ghosts of the Maze Patrol
