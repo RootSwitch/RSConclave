@@ -199,6 +199,15 @@ check "nonsense VRAM does not print a size" "$([ "$(grep -c 'GPU memory: about' 
 rc=$(STUB_PCI=amd STUB_GFX=gfx1100 run --pull stub:7b)
 check "no tiny-model hint when --pull given" "$([ "$(grep -c 'pull llama3.2:3b' "$LOG/out.txt")" = 0 ]; echo $?)"
 
+echo "=== D4: model directory is always stated ==="
+rc=$(run)
+check "default path reported" "$(grep -q 'usr/share/ollama/.ollama/models' "$LOG/out.txt"; echo $?)"
+check "default says OS disk" "$(grep -q 'on the OS disk' "$LOG/out.txt"; echo $?)"
+rc=$(run --models "$T/models2")
+check "explicit path reported" "$(grep -q "model directory: $T/models2" "$LOG/out.txt"; echo $?)"
+check "explicit path suppresses the default line" "$([ "$(grep -c 'on the OS disk' "$LOG/out.txt")" = 0 ]; echo $?)"
+check "drop-in carries OLLAMA_MODELS" "$(grep -q "OLLAMA_MODELS=$T/models2" "$DROPIN"; echo $?)"
+
 echo "=== E: option validation ==="
 rc=$(run --tune)
 check "--tune without --pull dies" "$([ "$rc" != 0 ]; echo $?)"

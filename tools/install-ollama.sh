@@ -274,6 +274,24 @@ if [ -n "$MODELS_DIR" ]; then
     else
         warn "no 'ollama' user exists - leaving ownership of $MODELS_DIR alone"
     fi
+else
+    # Saying nothing here left the obvious next question - "where is the 20 GB
+    # going?" - unanswered in the one place someone is looking. The official
+    # installer creates an `ollama` system user whose home is /usr/share/ollama,
+    # and the service inherits it, so blobs land on the ROOT filesystem unless
+    # told otherwise.
+    say "model directory: /usr/share/ollama/.ollama/models (Ollama's default, on the OS disk)"
+    # Only nag when it actually matters. `|| true` because df can fail and this
+    # runs under `set -e`.
+    FREE_GB=$(df -Pk "${INSTALL_ROOT}/" 2>/dev/null | awk 'NR==2 {print int($4/1048576)}' || true)
+    if [ -n "$FREE_GB" ] && [ "$FREE_GB" -lt 50 ] 2>/dev/null; then
+        warn "about ${FREE_GB} GB free there. A 32B at Q4 is roughly 20 GB, and a pull that"
+        warn "runs out of room fails partway rather than politely. Consider --models /mnt/models"
+        warn "(docs/inference-host.md section 3), or expand root - Ubuntu's default LVM layout"
+        warn "leaves much of the disk unallocated (section 1 has the lvextend)."
+    elif [ -n "$FREE_GB" ]; then
+        say "about ${FREE_GB} GB free there"
+    fi
 fi
 
 # ----- systemd drop-in -------------------------------------------------------
