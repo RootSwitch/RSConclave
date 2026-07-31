@@ -23,12 +23,39 @@ Use the **standard** install, not "minimized" - minimized strips editors and
 utilities you will want on a box you SSH into.
 
 Installer choices: install OpenSSH server (your way in), skip the featured
-snaps (install Docker from its own repo later). If you keep the default LVM
-layout, expand root afterwards so you do not strand disk:
+snaps (install Docker from its own repo later).
+
+**Give root the whole disk.** Model blobs are tens of gigabytes and the
+default layout does not expect that. There are two different situations here
+and the wrong fix silently does nothing in the other one:
+
+*The installer left free space in the volume group* - the usual case, because
+Ubuntu's guided LVM allocates only part of the disk:
 
 ```bash
 sudo lvextend -l +100%FREE /dev/ubuntu-vg/ubuntu-lv && sudo resize2fs /dev/ubuntu-vg/ubuntu-lv
 ```
+
+*You grew the underlying disk afterwards* - a VM whose virtual disk was
+expanded. The partition still ends where it did, so the volume group has no
+free extents and the command above reports there is nothing to extend. Grow
+the partition and the physical volume first:
+
+```bash
+lsblk                                    # confirm the new size; note the LVM partition
+sudo apt install -y cloud-guest-utils    # provides growpart
+sudo growpart /dev/sda 3                 # DEVICE then NUMBER, separated by a space
+sudo pvresize /dev/sda3
+sudo lvextend -l +100%FREE /dev/ubuntu-vg/ubuntu-lv
+sudo resize2fs /dev/ubuntu-vg/ubuntu-lv
+df -h /
+```
+
+Substitute your own names: the disk is `vda` on virtio and `nvme0n1` on NVMe,
+and `lsblk` shows which partition holds LVM. All of it runs online - ext4
+grows on a mounted root. If `lsblk` still shows the old size, the guest has
+not noticed the expansion yet: reboot, or
+`echo 1 | sudo tee /sys/class/block/sda/device/rescan`.
 
 Then the basics:
 
