@@ -148,10 +148,13 @@ function genParams(tempValue, ctxValue, maxTokensValue) {
  */
 function maxTokensInput(value) {
   const input = el('input', { type: 'number', step: '256', min: '1', placeholder: 'max out',
-    title: 'Maximum tokens this seat may generate in one turn. Blank = the provider default. '
-      + 'Caps runaway answers, and on a paid endpoint caps what one turn can cost. '
-      + 'Careful with reasoning models: the cap covers thinking too, so a small number can be '
-      + 'spent entirely inside <think> and leave no answer at all.' });
+    title: 'Maximum tokens this seat may generate in one turn. Blank = the server default, '
+      + 'which is usually what you want here.\n\n'
+      + 'Everything this app talks to is your own hardware, so a long answer costs you seconds - '
+      + 'while a cap set too low can silence a model completely. The cap covers REASONING: these '
+      + 'models routinely spend 90% of a turn thinking, by an amount that varies several-fold '
+      + 'between runs of the same prompt, so a number that worked yesterday can produce an empty '
+      + 'answer today. Set it only when you deliberately want turns cut short.' });
   if (value !== undefined && value !== null) input.value = value;
   return input;
 }
