@@ -165,9 +165,17 @@ than tenfold. Measure your own instead:
 ```
 
 It loads the model at two context sizes, reads the real footprint from `/api/ps`, and reports
-bytes per token plus the largest window that stays fully GPU-resident, with the Modelfile line
-to bake it in. Building the inference host from scratch, NVIDIA or AMD, is covered in
-[docs/inference-host.md](docs/inference-host.md).
+bytes per token plus the largest window that stays fully GPU-resident. Add `--apply` and it
+bakes the number in for you - a rebuild over the same blobs, no re-download, and every client
+of that daemon gets the new default, not just RSConclave:
+
+```bash
+./tools/measure-ctx.sh qwen3-coder:30b --vram 24 --apply
+```
+
+Building the inference host from scratch, NVIDIA or AMD, is covered in
+[docs/inference-host.md](docs/inference-host.md), and `tools/install-ollama.sh` does the
+Ollama half of it in one shot. [tools/README.md](tools/README.md) indexes every script here.
 
 ## Run and host
 
