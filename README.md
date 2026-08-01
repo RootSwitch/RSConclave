@@ -177,6 +177,29 @@ Building the inference host from scratch, NVIDIA or AMD, is covered in
 [docs/inference-host.md](docs/inference-host.md), and `tools/install-ollama.sh` does the
 Ollama half of it in one shot. [tools/README.md](tools/README.md) indexes every script here.
 
+### A roundtable fills its window faster than you would guess
+
+Every seat's turn resends the entire conversation so far, so the prompt grows with each turn
+while the answer does not. Measured, two seats, eight turns, answers capped at 120 tokens:
+
+| turn | prompt sent | answer |
+|---|---|---|
+| 1 | 114 | 107 |
+| 4 | 549 | 120 |
+| 8 | 1,130 | 120 |
+
+Turn eight sent ten times what turn one sent for the same size answer. Per-turn growth is
+linear at about 145 tokens a turn here, so **a seat left at Ollama's 4096 default starts
+truncating from the front at around turn 29** - which is exactly the silent failure this
+section opens with, arriving in an ordinary-length conversation. By turn 40 each turn is
+sending roughly 5,800 tokens. Real turns are longer than the 120-token answers measured here,
+so in practice it arrives sooner.
+
+**Keep last N entries** caps it: each turn's prompt becomes a constant instead of a growing
+number, and the dropped history is replaced by an explicit moderator note rather than vanishing.
+Councils have no such curve - each member is sent your prompt alone, never the other members'
+answers, so nothing compounds.
+
 ## Run and host
 
 **RSConclave is its own web server.** There is no separate hosting step - no nginx, no IIS, no
