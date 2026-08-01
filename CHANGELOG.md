@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+**Every seat gets a `max out` cap, and `ctx` stops appearing where it does
+nothing.** `maxTokens` was already in the params type and already honoured by
+both providers - Ollama as num_predict, openai-compat as max_tokens - but
+nothing in the UI ever set it, so a seat's answer had no ceiling but the
+server's own default. `num_ctx` is the mirror image: an Ollama option that does
+nothing for an openai-compatible server, whose input nevertheless rendered on
+every seat with a tooltip explaining about VRAM. It now shows only for Ollama
+seats. Both apply across chat, council members, the consolidator, roundtable
+seats, the judge, and pipeline stages.
+
 **Changing your password now asks for it twice.** A change signs out every
 other session, so a typo locked you out of a password you never knowingly
 chose - and you found out at the next sign in, not while you were still

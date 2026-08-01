@@ -63,6 +63,8 @@ const Council = {
     if (App.config.endpoints.some((ep) => ep.id === cfg.endpointId)) endpointSel.value = cfg.endpointId;
     const modelSel = el('select', {});
     const ctxEl = ctxInput(cfg.params?.num_ctx);
+    ollamaOnly(ctxEl, endpointSel); // this select is filled at construction, so no re-sync
+    const maxOutEl = maxTokensInput(cfg.params?.maxTokens);
 
     const fillModels = async (preferred) => {
       modelSel.replaceChildren(el('option', {}, 'loading…'));
@@ -93,7 +95,7 @@ const Council = {
             try {
               await Api.councilConsolidate(
                 session.id, templateEl.value,
-                endpointSel.value, modelSel.value, genParams(undefined, ctxEl.value),
+                endpointSel.value, modelSel.value, genParams(undefined, ctxEl.value, maxOutEl.value),
               );
             } catch (err) { alert(err.message); }
           } }, 'Re-run consolidation'),
@@ -113,9 +115,12 @@ const Council = {
       title: 'Leave blank for a normal council. Two or more options turns on ballot mode.',
     });
     const consolidatorCtxEl = ctxInput();
+    const consolidatorMaxOutEl = maxTokensInput();
+    const syncConsolidatorCtx = ollamaOnly(consolidatorCtxEl, consolidatorSel, (s) => (s.value || '|').split('|')[0]);
     const errEl = el('div', { class: 'error-text' });
 
-    this.form = { promptEl, consolidatorSel, templateEl, unloadEl, ballotEl, consolidatorCtxEl, errEl, memberRows: [], modelListEl };
+    this.form = { promptEl, consolidatorSel, templateEl, unloadEl, ballotEl, consolidatorCtxEl,
+      consolidatorMaxOutEl, syncConsolidatorCtx, errEl, memberRows: [], modelListEl };
 
     const presetSel = el('select', {}, el('option', { value: '' }, ' - load preset - '),
       ...App.presets.councils.map((p) => el('option', { value: p.id }, p.name)));
@@ -143,6 +148,7 @@ const Council = {
         el('label', {}, 'Consolidator'),
         consolidatorSel,
         consolidatorCtxEl,
+        consolidatorMaxOutEl,
         el('span', { class: 'muted', title: 'The consolidator reads every response at once - it usually needs the biggest window of all.' }, '⟵ give it room'),
         el('label', {}, unloadEl, ' unload each model after its turn (keep_alive=0)'),
       ),
@@ -174,7 +180,9 @@ const Council = {
     const temp = el('input', { type: 'number', step: '0.1', min: '0', max: '2', placeholder: 'temp' });
     if (opts.temp !== undefined) temp.value = opts.temp;
     const ctx = ctxInput(opts.numCtx);
-    const row = { endpointId, model, cb, tempInput: temp, ctxInput: ctx, isClone: !!opts.isClone };
+    ollamaOnly(ctx, endpointId); // fixed endpoint for this row, so no re-sync needed
+    const maxOut = maxTokensInput(opts.maxTokens);
+    const row = { endpointId, model, cb, tempInput: temp, ctxInput: ctx, maxOutInput: maxOut, isClone: !!opts.isClone };
 
     const controls = [];
     if (opts.isClone) {
@@ -199,7 +207,7 @@ const Council = {
         (opts.isClone ? '↳ ' : '') + modelLabel(endpointId, model)),
       opts.isClone ? null : ctxTag(endpointId, model),
       el('span', { class: 'grow' }),
-      temp, ctx, ...controls);
+      temp, ctx, maxOut, ...controls);
     this.form.memberRows.push(row);
     return row;
   },
@@ -232,6 +240,7 @@ const Council = {
         }, `${m.label} (${ep.name})${ctxSuffix(App.modelInfo(ep.id, m.id))}`));
       }
     }
+    this.form.syncConsolidatorCtx(); // the select finally has a value to read
   },
 
   collectConfig() {
@@ -242,7 +251,7 @@ const Council = {
       members.push({
         endpointId: row.endpointId,
         model: row.model,
-        params: genParams(row.tempInput.value, row.ctxInput.value),
+        params: genParams(row.tempInput.value, row.ctxInput.value, row.maxOutInput.value),
       });
     }
     const [cEndpoint, cModel] = (f.consolidatorSel.value || '|').split('|');
@@ -253,7 +262,7 @@ const Council = {
         endpointId: cEndpoint,
         model: cModel,
         template: f.templateEl.value,
-        params: genParams(undefined, f.consolidatorCtxEl.value),
+        params: genParams(undefined, f.consolidatorCtxEl.value, f.consolidatorMaxOutEl.value),
       },
       unloadBetweenModels: f.unloadEl.checked,
       // One option is not a ballot, it is a leading question - so anything under

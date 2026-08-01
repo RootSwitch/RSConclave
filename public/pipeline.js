@@ -107,12 +107,14 @@ const Pipeline = {
       model: el('select', {}),
       temp: el('input', { type: 'number', step: '0.1', min: '0', max: '2', placeholder: 'temp' }),
       ctx: ctxInput(preset?.params?.num_ctx),
+      maxOut: maxTokensInput(preset?.params?.maxTokens),
       template: el('textarea', { rows: 3, placeholder: 'Stage prompt - use {{INPUT}} for the previous output…' },
         preset?.template ?? ''),
     };
     if (preset?.params?.temperature !== undefined) els.temp.value = preset.params.temperature;
 
     for (const ep of App.config.endpoints) els.endpoint.append(el('option', { value: ep.id }, ep.name));
+    ollamaOnly(els.ctx, els.endpoint)(); // options exist now, so the kind is readable
     if (preset?.endpointId) els.endpoint.value = preset.endpointId;
     const fillModels = async () => {
       els.model.replaceChildren(el('option', {}, 'loading…'));
@@ -135,7 +137,7 @@ const Pipeline = {
     } }, '✕');
 
     const row = el('div', { class: 'stage-row' },
-      els.name, els.endpoint, els.model, els.temp, els.ctx, removeBtn, els.template);
+      els.name, els.endpoint, els.model, els.temp, els.ctx, els.maxOut, removeBtn, els.template);
     rowsWrap.append(row);
     this.stages.push({ id, els });
     return row;
@@ -150,7 +152,7 @@ const Pipeline = {
         endpointId: s.els.endpoint.value,
         model: s.els.model.value,
         template: s.els.template.value,
-        params: genParams(s.els.temp.value, s.els.ctx.value),
+        params: genParams(s.els.temp.value, s.els.ctx.value, s.els.maxOut.value),
       });
     }
     return stages;

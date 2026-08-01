@@ -84,10 +84,15 @@ const Chat = {
     onEnterSend(message, () => this.start());
     const temp = el('input', { type: 'number', step: '0.1', min: '0', max: '2', placeholder: 'temp' });
     const ctx = ctxInput();
+    // Label and input hide together, or the orphaned "ctx" caption stays put.
+    const ctxField = el('span', { class: 'row' }, el('label', {}, 'ctx'), ctx);
+    const syncCtx = ollamaOnly(ctxField, endpoint);
+    const maxOut = maxTokensInput();
     const errEl = el('div', { class: 'error-text' });
-    this.setup = { endpoint, model, persona, system, message, temp, ctx, errEl };
+    this.setup = { endpoint, model, persona, system, message, temp, ctx, maxOut, errEl };
 
     for (const ep of App.config.endpoints) endpoint.append(el('option', { value: ep.id }, ep.name));
+    syncCtx(); // options exist now, so the kind is finally knowable
     const fillModels = async () => {
       model.replaceChildren(el('option', {}, 'loading…'));
       try {
@@ -109,7 +114,8 @@ const Chat = {
       el('div', { class: 'row' },
         el('label', {}, 'Model'), endpoint, model,
         el('label', {}, 'temp'), temp,
-        el('label', {}, 'ctx'), ctx,
+        ctxField,
+        el('label', {}, 'max out'), maxOut,
       ),
       el('details', {},
         el('summary', {}, 'Persona & system prompt (optional)'),
@@ -160,7 +166,7 @@ const Chat = {
         model: s.model.value,
         personaId: s.persona.value || undefined,
         systemPrompt: s.system.value.trim() || undefined,
-        params: genParams(s.temp.value, s.ctx.value),
+        params: genParams(s.temp.value, s.ctx.value, s.maxOut.value),
       }));
       if (!started) return; // box was busy and you chose to leave it running
       const { sessionId } = started;

@@ -122,11 +122,13 @@ const Roundtable = {
     endpointSel.onchange = fillModels;
     const templateEl = el('textarea', { rows: 6 }, App.presets.judgeTemplate || '{{TRANSCRIPT}}');
     const judgeCtxEl = ctxInput();
+    const judgeMaxOutEl = maxTokensInput();
+    ollamaOnly(judgeCtxEl, endpointSel); // filled at construction, no re-sync
     return el('details', { style: 'margin-bottom: 10px' },
       el('summary', {}, 'Judge / consolidate this conversation'),
       el('div', { class: 'col' },
         el('div', { class: 'row' },
-          el('label', {}, 'Judge model'), endpointSel, modelSel, judgeCtxEl,
+          el('label', {}, 'Judge model'), endpointSel, modelSel, judgeCtxEl, judgeMaxOutEl,
           el('span', { class: 'muted', title: 'The judge reads the whole transcript at once - give it a window bigger than the conversation.' }, '⟵ give it room'),
         ),
         el('label', {}, 'Template ({{TRANSCRIPT}} = the labeled conversation)'),
@@ -134,7 +136,7 @@ const Roundtable = {
         el('div', { class: 'row' },
           el('button', { class: 'primary', onclick: () => {
             if (!modelSel.value) return;
-            Api.rtConsolidate(session.id, endpointSel.value, modelSel.value, templateEl.value, genParams(undefined, judgeCtxEl.value))
+            Api.rtConsolidate(session.id, endpointSel.value, modelSel.value, templateEl.value, genParams(undefined, judgeCtxEl.value, judgeMaxOutEl.value))
               .catch((e) => alert(e.message));
           } }, 'Run judge'),
         ),
@@ -288,6 +290,7 @@ const Roundtable = {
         ...App.personas.map((p) => el('option', { value: p.id }, p.name))),
       temp: el('input', { type: 'number', step: '0.1', min: '0', max: '2', placeholder: 'temp' }),
       ctx: ctxInput(preset?.params?.num_ctx),
+      maxOut: maxTokensInput(preset?.params?.maxTokens),
       overlay: el('textarea', {
         rows: 2,
         // No example here on purpose. The Ideas fold below now does the "what is
@@ -305,6 +308,9 @@ const Roundtable = {
       els.endpoint.append(el('option', { value: ep.id }, ep.name));
     }
     els.endpoint.append(el('option', { value: '__human' }, '🧑 human (you)'));
+    // Options exist now, so the endpoint kind is finally readable. A human seat
+    // is not an endpoint at all, so it hides too - which is what we want.
+    ollamaOnly(els.ctx, els.endpoint)();
     if (preset?.kind === 'human') els.endpoint.value = '__human';
     else if (preset?.endpointId) els.endpoint.value = preset.endpointId;
     const fillModels = async () => {
@@ -313,6 +319,7 @@ const Roundtable = {
       els.persona.disabled = human;
       els.temp.disabled = human;
       els.ctx.disabled = human;
+      els.maxOut.disabled = human;
       if (human) {
         els.model.replaceChildren(el('option', {}, ' - '));
         return;
@@ -337,7 +344,7 @@ const Roundtable = {
     } }, '✕');
 
     const row = el('div', { class: 'participant-row' },
-      els.color, els.name, els.endpoint, els.model, els.persona, els.temp, els.ctx, removeBtn, els.overlay);
+      els.color, els.name, els.endpoint, els.model, els.persona, els.temp, els.ctx, els.maxOut, removeBtn, els.overlay);
     rowsWrap.append(row);
     this.parts.push({ id, els });
   },
@@ -384,7 +391,7 @@ const Roundtable = {
         model: human ? '' : p.els.model.value,
         personaId: (!human && p.els.persona.value) || undefined,
         overlayPrompt: (!human && p.els.overlay.value.trim()) || undefined,
-        params: human ? undefined : genParams(p.els.temp.value, p.els.ctx.value),
+        params: human ? undefined : genParams(p.els.temp.value, p.els.ctx.value, p.els.maxOut.value),
         color: p.els.color.value,
       });
     }

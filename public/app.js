@@ -123,14 +123,63 @@ function ctxLabel(info) {
 }
 
 /** Build a GenParams object from optional temp/ctx input values; undefined if both blank. */
-function genParams(tempValue, ctxValue) {
+/** The endpoint record behind an id, or undefined once it has been deleted. */
+function endpointOf(endpointId) {
+  return App.config.endpoints.find((e) => e.id === endpointId);
+}
+
+function genParams(tempValue, ctxValue, maxTokensValue) {
   const p = {};
   const t = parseFloat(tempValue);
   if (Number.isFinite(t)) p.temperature = t;
   const c = parseInt(ctxValue, 10);
   if (Number.isFinite(c) && c > 0) p.num_ctx = c;
+  const m = parseInt(maxTokensValue, 10);
+  if (Number.isFinite(m) && m > 0) p.maxTokens = m;
   return Object.keys(p).length ? p : undefined;
 }
+
+/*
+ * A ceiling on how much this seat may generate. Every provider honours it -
+ * Ollama as num_predict, the rest as max_tokens - but the reason it is worth
+ * typing differs: on your own box a rambling model costs you time, on a
+ * metered API it costs money, and a council seat with no ceiling is an open
+ * tab. Blank means the provider's own default.
+ */
+function maxTokensInput(value) {
+  const input = el('input', { type: 'number', step: '256', min: '1', placeholder: 'max out',
+    title: 'Maximum tokens this seat may generate in one turn. Blank = the provider default. Caps runaway answers, and on a paid endpoint caps what one turn can cost.' });
+  if (value !== undefined && value !== null) input.value = value;
+  return input;
+}
+
+/*
+ * Show a control only for Ollama endpoints.
+ *
+ * num_ctx is an Ollama option and does nothing anywhere else, but the input
+ * rendered for every seat regardless - so on an Anthropic or Gemini seat it
+ * read as a context control that silently did nothing, tooltip cheerfully
+ * explaining about VRAM. Same reasoning as keep_alive and the ON THE BOX
+ * panel, which were hidden by kind when cloud endpoints arrived; this one was
+ * missed.
+ *
+ * `source` is either an endpoint <select> (re-checked whenever it changes) or
+ * a fixed endpoint id for rows whose endpoint cannot change. `idOf` reads the
+ * id out of the select for the pickers that encode "endpointId|model".
+ *
+ * Returns sync(): call it after the select's options are filled in. Several of
+ * these selects are populated asynchronously AFTER the row is built, so the
+ * first check runs against an empty value, and filling options programmatically
+ * fires no change event to correct it.
+ */
+function ollamaOnly(node, source, idOf) {
+  const read = () => (typeof source === 'string' ? source : idOf ? idOf(source) : source.value);
+  const sync = () => node.classList.toggle('hidden', endpointOf(read())?.kind !== 'ollama');
+  if (typeof source !== 'string') source.addEventListener('change', sync);
+  sync();
+  return sync;
+}
+
 
 /** num_ctx input used by every seat/stage row. */
 function ctxInput(value) {
