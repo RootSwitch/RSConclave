@@ -12,12 +12,30 @@ export function renderResponses(config: CouncilConfig, entries: TranscriptEntry[
   for (let i = 0; i < config.members.length; i++) {
     const m = config.members[i];
     const entry = entries.filter((e) => e.memberIndex === i).at(-1);
-    if (entry && entry.kind !== 'error' && entry.text.trim()) {
+    /*
+     * Judge emptiness on the ANSWER, not on the raw text.
+     *
+     * A reasoning model given a small output cap can spend the entire budget
+     * inside <think>, close the tag, and stop with no prose at all. The raw
+     * entry is then hundreds of characters long and passes any "did it say
+     * something" test, while the part anyone can read is empty - so the
+     * consolidator was handed a labelled block containing nothing and asked to
+     * summarise it, which it duly did. Observed with a 120-token cap on a live
+     * reasoning model; every other emptiness test in the codebase already
+     * strips think first (see isFinishedTurn), and this one was missed.
+     */
+    const answer = entry ? stripThink(entry.text).trim() : '';
+    if (entry && entry.kind !== 'error' && answer) {
       // Labelled format, so a cancelled partial is included and marked rather
       // than reported as "no response" for text the user can see on screen.
-      blocks.push(`=== RESPONSE FROM: ${m.model}${incompleteNote(entry)} ===\n${stripThink(entry.text)}\n=== END RESPONSE ===`);
+      blocks.push(`=== RESPONSE FROM: ${m.model}${incompleteNote(entry)} ===\n${answer}\n=== END RESPONSE ===`);
     } else {
-      blocks.push(`=== RESPONSE FROM: ${m.model} ===\n(no response - error)\n=== END RESPONSE ===`);
+      // Say which kind of nothing it was: "it thought and never answered" is a
+      // cap to raise, "it errored" is something else entirely.
+      const why = entry && entry.kind !== 'error' && entry.text.trim()
+        ? '(no answer - the model used its whole output budget reasoning)'
+        : '(no response - error)';
+      blocks.push(`=== RESPONSE FROM: ${m.model} ===\n${why}\n=== END RESPONSE ===`);
     }
   }
   return blocks.join('\n\n');

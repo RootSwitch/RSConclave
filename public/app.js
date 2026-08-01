@@ -148,7 +148,10 @@ function genParams(tempValue, ctxValue, maxTokensValue) {
  */
 function maxTokensInput(value) {
   const input = el('input', { type: 'number', step: '256', min: '1', placeholder: 'max out',
-    title: 'Maximum tokens this seat may generate in one turn. Blank = the provider default. Caps runaway answers, and on a paid endpoint caps what one turn can cost.' });
+    title: 'Maximum tokens this seat may generate in one turn. Blank = the provider default. '
+      + 'Caps runaway answers, and on a paid endpoint caps what one turn can cost. '
+      + 'Careful with reasoning models: the cap covers thinking too, so a small number can be '
+      + 'spent entirely inside <think> and leave no answer at all.' });
   if (value !== undefined && value !== null) input.value = value;
   return input;
 }

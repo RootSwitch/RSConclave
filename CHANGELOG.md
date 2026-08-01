@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+**A model that only thought is no longer presented as having answered.** Give a
+reasoning model a small output cap and it can spend the whole budget inside
+`<think>`, close the tag, and stop with no prose at all. The entry is then
+hundreds of characters long, so the check for "did this member say anything"
+passed on the raw text - and the consolidator was handed a labelled response
+block containing nothing, which it dutifully summarised. Emptiness is now
+judged on the answer, the same way every other check in the codebase already
+judged it. Found by running a real council against local reasoning models.
+
 **Every seat gets a `max out` cap, and `ctx` stops appearing where it does
 nothing.** `maxTokens` was already in the params type and already honoured by
 both providers - Ollama as num_predict, openai-compat as max_tokens - but

@@ -32,6 +32,35 @@ test('renderResponses: errored/missing members noted', () => {
   assert.ok(out.includes('=== RESPONSE FROM: jester:7b ===\n(no response - error)'));
 });
 
+/*
+ * Found in live use, not by inspection: a 120-token cap on a reasoning model
+ * produced a 554-character entry whose readable part was empty, because the
+ * whole budget went inside <think>. The old gate tested the RAW text, so that
+ * counted as a response and the consolidator was handed an empty labelled
+ * block to summarise - which it dutifully did.
+ */
+test('renderResponses: a model that only thought did not answer', () => {
+  const entries = [
+    entry({ memberIndex: 0, text: '<think>Let me weigh both sides carefully.</think>' }),
+    entry({ memberIndex: 1, text: 'It is a taco.' }),
+  ];
+  const out = renderResponses(config, entries);
+  assert.ok(
+    out.includes('=== RESPONSE FROM: sage:30b ===\n(no answer - the model used its whole output budget reasoning)'),
+    'a think-only entry must not be presented as an answer');
+  assert.ok(!out.includes('=== RESPONSE FROM: sage:30b ===\n\n'),
+    'and must never render as an empty block');
+  assert.ok(out.includes('=== RESPONSE FROM: jester:7b ===\nIt is a taco.'),
+    'the real answer still comes through');
+});
+
+test('renderResponses: thinking is stripped but the answer after it survives', () => {
+  const entries = [entry({ memberIndex: 0, text: '<think>weighing</think>\n\nYes, narrowly.' })];
+  const out = renderResponses(config, entries);
+  assert.ok(out.includes('=== RESPONSE FROM: sage:30b ===\nYes, narrowly.'));
+  assert.ok(!out.includes('weighing'));
+});
+
 test('renderResponses: rerun replaces earlier response (last entry wins)', () => {
   const entries = [
     entry({ memberIndex: 0, text: 'First try.' }),
