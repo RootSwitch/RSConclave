@@ -114,12 +114,22 @@ const Council = {
       placeholder: 'e.g. Yes, No, Needs more information',
       title: 'Leave blank for a normal council. Two or more options turns on ballot mode.',
     });
+    /*
+     * Sometimes the spread of answers IS the output. Consolidating is an extra
+     * call, on the largest context of the run, often to the priciest model -
+     * and it is the wrong shape entirely when you wanted five opinions rather
+     * than one synthesis. Off means off for THIS run only: the consolidator is
+     * still recorded, so the Consolidate button in the session view can still
+     * synthesise afterwards if you change your mind.
+     */
+    const consolidateEl = el('input', { type: 'checkbox' });
+    consolidateEl.checked = true;
     const consolidatorCtxEl = ctxInput();
     const consolidatorMaxOutEl = maxTokensInput();
     const syncConsolidatorCtx = ollamaOnly(consolidatorCtxEl, consolidatorSel, (s) => (s.value || '|').split('|')[0]);
     const errEl = el('div', { class: 'error-text' });
 
-    this.form = { promptEl, consolidatorSel, templateEl, unloadEl, ballotEl, consolidatorCtxEl,
+    this.form = { promptEl, consolidatorSel, templateEl, unloadEl, ballotEl, consolidateEl, consolidatorCtxEl,
       consolidatorMaxOutEl, syncConsolidatorCtx, errEl, memberRows: [], modelListEl };
 
     const presetSel = el('select', {}, el('option', { value: '' }, ' - load preset - '),
@@ -133,6 +143,26 @@ const Council = {
     // Kept so applyConfig can wait for the checklist before ticking boxes in it.
     this.form.ready = this.populateModels().catch((err) => errEl.append(err.message));
 
+    const consolidatorRow = el('div', { class: 'row' },
+      el('label', {}, 'Consolidator'),
+      consolidatorSel,
+      consolidatorCtxEl,
+      consolidatorMaxOutEl,
+      el('span', { class: 'muted', title: 'The consolidator reads every response at once - it usually needs the biggest window of all.' }, '⟵ give it room'),
+    );
+    const templateDetails = el('details', {},
+      el('summary', {}, 'Consolidator prompt template ({{PROMPT}}, {{RESPONSES}})'),
+      templateEl,
+    );
+    // The consolidator's engine, window and template are noise when nothing is
+    // going to consolidate.
+    const applyConsolidateUI = () => {
+      const off = !consolidateEl.checked;
+      for (const node of [consolidatorRow, templateDetails]) node.classList.toggle('hidden', off);
+    };
+    consolidateEl.addEventListener('change', applyConsolidateUI);
+    applyConsolidateUI();
+
     return el('div', { class: 'setup-band' },
       el('div', { class: 'row' },
         el('label', {}, 'Prompt'),
@@ -145,17 +175,15 @@ const Council = {
       el('label', {}, 'Council members (queried in order, one at a time - ＋ adds the same model again, e.g. at another temperature)'),
       modelListEl,
       el('div', { class: 'row' },
-        el('label', {}, 'Consolidator'),
-        consolidatorSel,
-        consolidatorCtxEl,
-        consolidatorMaxOutEl,
-        el('span', { class: 'muted', title: 'The consolidator reads every response at once - it usually needs the biggest window of all.' }, '⟵ give it room'),
+        el('label', { title: 'Off: run the members and stop, leaving their answers side by side. You can still consolidate later from the session.' },
+          consolidateEl, ' consolidate the answers'),
+        el('span', { class: 'grow' }),
+      ),
+      consolidatorRow,
+      el('div', { class: 'row' },
         el('label', {}, unloadEl, ' unload each model after its turn (keep_alive=0)'),
       ),
-      el('details', {},
-        el('summary', {}, 'Consolidator prompt template ({{PROMPT}}, {{RESPONSES}})'),
-        templateEl,
-      ),
+      templateDetails,
       el('details', {},
         el('summary', {}, 'Ballot - tally a straight answer as well as the prose (optional)'),
         el('div', { class: 'col' },
@@ -265,6 +293,7 @@ const Council = {
         params: genParams(undefined, f.consolidatorCtxEl.value, f.consolidatorMaxOutEl.value),
       },
       unloadBetweenModels: f.unloadEl.checked,
+      skipConsolidation: f.consolidateEl.checked ? undefined : true,
       // One option is not a ballot, it is a leading question - so anything under
       // two is treated as ballot mode being off.
       ballot: (() => {

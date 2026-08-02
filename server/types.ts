@@ -57,6 +57,15 @@ export interface CouncilConfig {
   consolidator: CouncilMember & { template: string };
   unloadBetweenModels?: boolean; // keep_alive: "0" per member call
   /*
+   * Run the members and stop. Sometimes a spread of separate answers IS the
+   * output and comparing them adds nothing - and the consolidation is an extra
+   * call, on the biggest context of the run, often to the most expensive model.
+   *
+   * The consolidator is still recorded, so "actually, synthesise these after
+   * all" from the session view works without reconfiguring anything.
+   */
+  skipConsolidation?: boolean;
+  /*
    * Ballot mode. When set, every member is asked to end its answer with one of
    * these options and the results are tallied. The members still answer in
    * prose - the vote is an extra signal, not a replacement - because "4 of 5

@@ -466,7 +466,9 @@ async function runCouncil(): Promise<void> {
       break;
     }
   }
-  if (active === a && !a.pauseRequested) await runConsolidation(a);
+  // A council can deliberately end at the answers; see skipConsolidation. The
+  // Consolidate button in the session view still runs it later on demand.
+  if (active === a && !a.pauseRequested && !config.skipConsolidation) await runConsolidation(a);
   finishRun(a);
 }
 

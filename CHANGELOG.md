@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+**Clear sessions in bulk.** Select in the sidebar, tick what you want gone (or
+"all", which means everything currently listed - a tag filter still applies, so
+select-all never reaches past what you can see), and delete in one request
+rather than one confirm per session. The live run is skipped rather than
+failing the batch, and says so.
+
+**Council consolidation is optional.** Sometimes a spread of separate answers
+is the output and comparing them adds nothing - and the consolidation is an
+extra call on the largest context of the run. Untick "consolidate the answers"
+and the council ends at the members. The consolidator is still recorded either
+way, so the Consolidate button in the session view can still synthesise
+afterwards if you change your mind.
+
 **A model that only thought is no longer presented as having answered.** Give a
 reasoning model a small output cap and it can spend the whole budget inside
 `<think>`, close the tag, and stop with no prose at all. The entry is then

@@ -340,6 +340,32 @@ route('GET', '/api/sessions/:id', (req, res, params) => {
   if (!s) throw new HttpError(404, 'session not found');
   sendJson(res, 200, s);
 });
+/*
+ * Delete many at once. Testing an app like this produces dozens of throwaway
+ * sessions an afternoon, and clearing them one confirm at a time is its own
+ * chore.
+ *
+ * POST rather than DELETE because it carries a body, and a whole route rather
+ * than a loop of single deletes so a hundred sessions is one request. The live
+ * run is SKIPPED rather than failing the batch: "clear everything" should not
+ * refuse wholesale because one session happens to be running.
+ */
+route('POST', '/api/sessions/delete', async (req, res) => {
+  const me = userOf(req);
+  const { ids } = await readJsonBody(req, SMALL_BODY);
+  if (!Array.isArray(ids)) throw new HttpError(400, 'ids must be an array');
+  if (ids.length > 1000) throw new HttpError(400, 'too many sessions in one request');
+  const activeId = engine.getActiveSession(me)?.id;
+  let deleted = 0;
+  let skipped = 0;
+  for (const raw of ids) {
+    const id = String(raw);
+    if (id === activeId) { skipped++; continue; }
+    store.deleteSession(me, id);
+    deleted++;
+  }
+  sendJson(res, 200, { deleted, skipped });
+});
 route('DELETE', '/api/sessions/:id', (req, res, params) => {
   const me = userOf(req);
   if (engine.getActiveSession(me)?.id === params.id) throw new HttpError(409, 'session is active - stop it first');

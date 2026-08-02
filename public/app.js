@@ -122,12 +122,12 @@ function ctxLabel(info) {
   return `ctx ${fmtK(window)} ${dflt}/ ${fmtK(info.contextLength)} max`;
 }
 
-/** Build a GenParams object from optional temp/ctx input values; undefined if both blank. */
 /** The endpoint record behind an id, or undefined once it has been deleted. */
 function endpointOf(endpointId) {
   return App.config.endpoints.find((e) => e.id === endpointId);
 }
 
+/** Build a GenParams object from optional temp/ctx/max-out values; undefined if all blank. */
 function genParams(tempValue, ctxValue, maxTokensValue) {
   const p = {};
   const t = parseFloat(tempValue);
@@ -693,6 +693,8 @@ const App = {
   presets: { consolidatorTemplate: '', councils: [], roundtables: [] },
   modelsByEndpoint: {}, // endpointId -> string[] (lazy, cached)
   tagFilter: null,      // one tag at a time, or null for everything
+  selecting: false,     // sidebar is in pick-several-to-delete mode
+  selected: new Set(),  // session ids ticked while selecting
   modelInfoByEndpoint: {}, // endpointId -> { model: {contextLength, numCtx} }
   session: null, // session currently shown (active run or a loaded historical one)
   runState: { sessionId: null, phase: 'idle' },
@@ -878,6 +880,53 @@ function renderTagFilter(sessions) {
   host.replaceChildren(chip('all', null), ...tags.map((t) => chip(t, t)));
 }
 
+/*
+ * Bulk delete. Testing this app produces dozens of throwaway sessions in an
+ * afternoon, and clearing them one confirm at a time is its own chore.
+ *
+ * "All" means everything CURRENTLY LISTED, not everything on disk - with a tag
+ * filter active that is the whole point, and a select-all that silently
+ * reached past the filter would be the kind of surprise you cannot undo.
+ */
+function renderBulkBar(sessions) {
+  const host = document.getElementById('session-bulk');
+  if (!host) return;
+  const visible = sessions.map((s) => s.id);
+  if (!App.selecting) {
+    host.replaceChildren(el('button', {
+      class: 'mini',
+      title: 'Pick several sessions to delete at once',
+      onclick: () => { App.selecting = true; App.selected = new Set(); renderSessionList(); },
+    }, 'Select'));
+    return;
+  }
+  const chosen = visible.filter((id) => App.selected.has(id));
+  host.replaceChildren(
+    el('span', { class: 'muted' }, `${chosen.length} of ${visible.length}`),
+    el('span', { class: 'grow' }),
+    el('button', { class: 'mini', onclick: () => { for (const id of visible) App.selected.add(id); renderSessionList(); } }, 'all'),
+    el('button', { class: 'mini', onclick: () => { App.selected = new Set(); renderSessionList(); } }, 'none'),
+    el('button', {
+      class: 'mini danger',
+      disabled: chosen.length ? null : 'disabled',
+      onclick: async () => {
+        if (!confirm(`Delete ${chosen.length} session${chosen.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+        try {
+          const { skipped } = await Api.deleteSessions(chosen);
+          // The live run is skipped rather than failing the batch, so say so
+          // instead of leaving one row behind with no explanation.
+          if (skipped) alert(`${skipped} session was left alone because it is the active run. Stop it first.`);
+        } catch (err) { alert(err.message); }
+        if (App.session && chosen.includes(App.session.id)) App.session = null;
+        App.selecting = false;
+        App.selected = new Set();
+        renderSessionList();
+      },
+    }, 'Delete'),
+    el('button', { class: 'mini', onclick: () => { App.selecting = false; App.selected = new Set(); renderSessionList(); } }, 'Cancel'),
+  );
+}
+
 async function renderSessionList() {
   // While a search is active, its results own the list - the background
   // refreshes that fire on session events must not clobber them.
@@ -894,12 +943,39 @@ async function renderSessionList() {
   // keeps the list honest about what it is showing.
   if (App.tagFilter) sessions = sessions.filter((s) => (s.tags ?? []).includes(App.tagFilter));
 
+  renderBulkBar(sessions);
+
   const ul = document.getElementById('session-list');
   ul.replaceChildren(
     ...sessions.map((s) =>
       el(
         'li',
-        { class: App.session?.id === s.id ? 'active' : '', onclick: () => openSession(s.id) },
+        {
+          class: [App.session?.id === s.id ? 'active' : '', App.selecting ? 'selectable' : ''].filter(Boolean).join(' '),
+          // In select mode a click picks rather than opens. Loading a session
+          // mid-selection would swap the whole view out from under the choice
+          // being made.
+          onclick: () => {
+            if (!App.selecting) return openSession(s.id);
+            if (App.selected.has(s.id)) App.selected.delete(s.id);
+            else App.selected.add(s.id);
+            renderSessionList();
+          },
+        },
+        App.selecting
+          ? el('input', {
+              type: 'checkbox',
+              // Rendered from the set rather than left to the DOM, so the state
+              // survives the re-render this list does on every session event.
+              ...(App.selected.has(s.id) ? { checked: 'checked' } : {}),
+              onclick: (ev) => ev.stopPropagation(),
+              onchange: () => {
+                if (App.selected.has(s.id)) App.selected.delete(s.id);
+                else App.selected.add(s.id);
+                renderBulkBar(sessions);
+              },
+            })
+          : null,
         el('span', {}, s.title),
         el(
           'span',

@@ -55,6 +55,7 @@ const Api = {
   searchSessions: (q) => Api._json(`/api/search?q=${encodeURIComponent(q)}`),
   getSession: (id) => Api._json(`/api/sessions/${id}`),
   deleteSession: (id) => Api._json(`/api/sessions/${id}`, { method: 'DELETE' }),
+  deleteSessions: (ids) => Api._post('/api/sessions/delete', { ids }),
   resumeSession: (id) => Api._post(`/api/sessions/${id}/resume`),
   forkSession: (id, entryId) => Api._post(`/api/sessions/${id}/fork`, { entryId }),
   importSession: (session) => Api._post('/api/sessions/import', session),
