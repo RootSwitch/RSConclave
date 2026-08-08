@@ -355,12 +355,13 @@ route('POST', '/api/sessions/delete', async (req, res) => {
   const { ids } = await readJsonBody(req, SMALL_BODY);
   if (!Array.isArray(ids)) throw new HttpError(400, 'ids must be an array');
   if (ids.length > 1000) throw new HttpError(400, 'too many sessions in one request');
-  const activeId = engine.getActiveSession(me)?.id;
   let deleted = 0;
   let skipped = 0;
   for (const raw of ids) {
     const id = String(raw);
-    if (id === activeId) { skipped++; continue; }
+    // Only a session mid-generation is skipped; holding the idle active slot
+    // is not a reason to survive a bulk delete.
+    if (!engine.releaseForDelete(me, id)) { skipped++; continue; }
     store.deleteSession(me, id);
     deleted++;
   }
@@ -368,7 +369,9 @@ route('POST', '/api/sessions/delete', async (req, res) => {
 });
 route('DELETE', '/api/sessions/:id', (req, res, params) => {
   const me = userOf(req);
-  if (engine.getActiveSession(me)?.id === params.id) throw new HttpError(409, 'session is active - stop it first');
+  if (!engine.releaseForDelete(me, params.id)) {
+    throw new HttpError(409, 'that session is generating right now - stop it first');
+  }
   store.deleteSession(me, params.id);
   sendJson(res, 200, { ok: true });
 });

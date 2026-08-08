@@ -136,6 +136,30 @@ export function getActiveSession(username: string): Session | null {
   return active && active.owner === username ? active.session : null;
 }
 
+/*
+ * Give up the active slot so a session can be deleted, and say whether that
+ * was possible.
+ *
+ * Holding the slot is not the same as running. A finished council keeps it
+ * until something displaces it, so deleting one refused with "stop it first" -
+ * advice you could not take, because there was nothing to stop and the UI
+ * correctly showed no Stop button. The only escape was starting another
+ * session purely to evict the old one.
+ *
+ * Only a live generation makes deletion genuinely unsafe: the turn in flight
+ * would write its result back to a file that no longer exists. Everything else
+ * - finished, errored, or a roundtable parked waiting for you to step - is
+ * just an abandoned run, which is what deleting it means.
+ */
+export function releaseForDelete(username: string, sessionId: string): boolean {
+  if (!active || active.owner !== username || active.session.id !== sessionId) return true;
+  if (active.phase === 'generating' || active.phase === 'auto_stepping') return false;
+  active = null;
+  broadcast('state', getState(username), username);
+  broadcast('busy', { busy: false });
+  return true;
+}
+
 function pushState(): void {
   if (active) broadcast('state', getState(active.owner), active.owner);
   // Everyone else only learns whether the box is occupied, never by what.

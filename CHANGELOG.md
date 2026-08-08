@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**A finished session can be deleted.** Holding the active slot was treated as
+being active, so any run that had ENDED still refused deletion with "stop it
+first" - advice nobody could take, because there was nothing running and the
+UI correctly showed no Stop button. The only way out was starting another
+session purely to evict the old one. Deletion is now refused only while a
+generation is genuinely in flight, and says so; anything finished, errored or
+parked mid-roundtable gives up the slot and goes.
+
 **Clear sessions in bulk.** Select in the sidebar, tick what you want gone (or
 "all", which means everything currently listed - a tag filter still applies, so
 select-all never reaches past what you can see), and delete in one request
