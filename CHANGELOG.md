@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+**Copy buttons on the text you started with.** The prompt, the input, the
+scenario, your own chat messages - the strings most worth reusing were the ones
+with no way to get them out short of the JSON view or selecting by hand. Your
+own turns were deliberately skipped on the theory that you wrote them so you
+have them, which misses the point: copying a prompt is how you send it
+somewhere ELSE, and fork and clone both keep the original model. The roundtable
+scenario was the worst of them - it is config rather than a transcript entry,
+so it appeared in no bubble at all.
+
 **A finished session can be deleted.** Holding the active slot was treated as
 being active, so any run that had ENDED still refused deletion with "stop it
 first" - advice nobody could take, because there was nothing running and the

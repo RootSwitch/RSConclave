@@ -196,7 +196,10 @@ const Pipeline = {
     for (const entry of session.entries) {
       if (entry.kind === 'user') {
         this.cardsWrap.append(el('div', { class: 'card prompt-card' },
-          el('div', { class: 'card-header' }, el('span', { class: 'model-name' }, 'Input')),
+          el('div', { class: 'card-header' },
+            el('span', { class: 'model-name' }, 'Input'),
+            el('span', { class: 'grow' }),
+            copyButton(() => entry.text)),
           el('div', { class: 'card-body' }, entry.text)));
       } else {
         this.cardsWrap.append(this.buildStageCard(session, entry, generating));

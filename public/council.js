@@ -462,9 +462,13 @@ const Council = {
     for (const entry of session.entries) {
       if (entry.kind === 'user') {
         userCount++;
+        // The prompt is the single most reusable string in a council - it is
+        // what you feed to a different set of models next.
         this.cardsWrap.append(el('div', { class: 'card prompt-card' },
           el('div', { class: 'card-header' },
-            el('span', { class: 'model-name' }, userCount === 1 ? 'Prompt' : `Follow-up ${userCount - 1}`)),
+            el('span', { class: 'model-name' }, userCount === 1 ? 'Prompt' : `Follow-up ${userCount - 1}`),
+            el('span', { class: 'grow' }),
+            copyButton(() => entry.text)),
           el('div', { class: 'card-body' }, entry.text)));
       } else {
         this.cardsWrap.append(this.buildEntryCard(session, entry, generating));

@@ -204,7 +204,14 @@ const Chat = {
         const footer = [];
         const s = statsLine(e.stats);
         if (s) footer.push(el('span', {}, s));
-        if (complete && e.text && !mine) footer.push(copyButton(() => e.text));
+        /*
+         * Including your own messages. They used to be excluded on the theory
+         * that you wrote them so you have them - but the whole point of
+         * copying a prompt is to send it somewhere else, and fork and clone
+         * both keep the model, so re-running one against a different engine
+         * meant selecting the bubble by hand.
+         */
+        if (complete && e.text) footer.push(copyButton(() => e.text));
         if (complete && e.text) footer.push(forkButton(session.id, e.id));
         // Only the newest reply can be continued: extending an older one would
         // rewrite history the later turns were already answering.

@@ -94,8 +94,19 @@ const Roundtable = {
     return el('details', { class: 'session-brief' },
       el('summary', {}, 'Scenario & participants'),
       el('div', {},
+        /*
+         * The scenario is the hardest text in the app to get back out: it is
+         * config rather than a transcript entry, so it appears in no bubble
+         * and carries none of the per-entry buttons. Short of the JSON view,
+         * reusing it meant selecting it by hand.
+         */
         cfg.scenario?.trim()
-          ? el('div', { class: 'brief-scenario' }, cfg.scenario.trim())
+          ? el('div', {},
+              el('div', { class: 'row' },
+                el('span', { class: 'eyebrow' }, 'Scenario'),
+                el('span', { class: 'grow' }),
+                copyButton(() => cfg.scenario.trim())),
+              el('div', { class: 'brief-scenario' }, cfg.scenario.trim()))
           : el('div', { class: 'muted brief-scenario' }, '(no scenario was set)'),
         el('div', { class: 'eyebrow', style: 'margin-bottom: 5px' }, 'Participants'),
         roster,
@@ -446,7 +457,8 @@ const Roundtable = {
         const statsRow = [];
         const stats = statsLine(e.stats);
         if (stats) statsRow.push(el('span', {}, stats));
-        if (complete && e.text && !neutral) statsRow.push(copyButton(() => e.text));
+        // Your turns and narrator injections included - see the chat view.
+        if (complete && e.text) statsRow.push(copyButton(() => e.text));
         // Forking matters most here: a roundtable that takes an interesting
         // wrong turn is worth branching rather than rerolling away.
         if (complete && e.text) statsRow.push(forkButton(session.id, e.id));
