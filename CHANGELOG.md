@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+**The tab title says what the run is doing.** A turn on your own hardware can
+take a minute, so tabbing away is the normal thing to do - and the tab said
+"RSConclave" whether a model was mid-thought or had finished ten minutes ago.
+It now leads with the state, because a background tab is narrow enough to show
+only a few characters: a dot and the speaker while generating, "your turn"
+while a roundtable gate waits on you, and "ready" if a run FINISHED while you
+were looking elsewhere, which clears the moment you come back. Chat rests in
+the same waiting phase as a gated roundtable, so it is deliberately excluded
+from "your turn" - a marker that is always on says nothing. No Notification
+API and no permission prompt.
+
 **Copy buttons on the text you started with.** The prompt, the input, the
 scenario, your own chat messages - the strings most worth reusing were the ones
 with no way to get them out short of the JSON view or selecting by hand. Your

@@ -793,6 +793,7 @@ async function openSession(id) {
   App.session = session;
   mountSessionView(App.session);
   renderSessionList();
+  renderTitle(); // the tab carries the session name, and no state event fires here
 }
 
 /* ---------- session search ---------- */
@@ -1004,7 +1005,62 @@ async function renderSessionList() {
 }
 
 /* ---------- status strip ---------- */
+/*
+ * The tab title, which is the only part of this app visible from another tab.
+ *
+ * A local run can take a minute or more, so tabbing away is the normal thing
+ * to do - and until now the tab said "RSOperator" whether it was thinking hard
+ * or had finished ten minutes ago.
+ *
+ * The state marker goes FIRST because a background tab is narrow enough to
+ * show only a few characters; a leading dot reads as "still going" at a glance
+ * without anything else being legible. The app name stays on the end, for the
+ * usual case of several tabs open at once.
+ *
+ * Deliberately no Notification API: it needs a permission prompt, and a local
+ * tool asking for one is exactly the sort of thing that makes people wonder
+ * what else it is doing. The title costs nothing and asks for nothing.
+ */
+const TITLE_APP = document.title;
+let titleLastPhase = 'idle';
+let titleFinishedUnseen = false;
+
+function renderTitle() {
+  const st = App.runState;
+  const running = st.phase === 'generating' || st.phase === 'auto_stepping';
+  const wasRunning = titleLastPhase === 'generating' || titleLastPhase === 'auto_stepping';
+  // A run that ended while you were looking needs no marker - you saw it.
+  if (wasRunning && !running && document.hidden) titleFinishedUnseen = true;
+  if (running) titleFinishedUnseen = false;
+  titleLastPhase = st.phase;
+
+  let mark = '';
+  if (running) mark = `● ${st.currentSpeaker ?? 'working'} - `;
+  /*
+   * Waiting on YOU - but only where that is news. A gated roundtable sits at
+   * awaiting_gate indefinitely until you press Step, which is worth a marker
+   * whether or not the tab is hidden. A chat rests in the same phase between
+   * every message, so marking that would pin "your turn" to the tab forever
+   * and teach you to ignore it.
+   */
+  else if (st.phase === 'awaiting_gate' && st.mode === 'roundtable') mark = '⏸ your turn - ';
+  else if (titleFinishedUnseen) mark = '✓ ready - ';
+
+  const name = App.session?.title?.trim();
+  const middle = name ? `${name.length > 40 ? name.slice(0, 39) + '…' : name} - ` : '';
+  document.title = mark + middle + TITLE_APP;
+}
+
+// Coming back to the tab IS the acknowledgement; nothing else clears it.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    titleFinishedUnseen = false;
+    renderTitle();
+  }
+});
+
 function renderStatus() {
+  renderTitle();
   const strip = document.getElementById('status-strip');
   const st = App.runState;
   const busy = st.phase !== 'idle' && st.phase !== 'done';
