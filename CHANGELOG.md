@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+**Hide reasoning while it streams.** Live reasoning is scratch work, and some
+models are neurotic out loud - debating tone, reminding themselves what they
+are, second-guessing an answer they already finished. A "hide reasoning"
+toggle in the status strip shows only the prose while a model streams;
+everything else is untouched. The tokens still arrive, the reasoning pill
+still says reasoning, and the completed message still snaps to markdown with
+the full expandable fold - what you skip is only the live spectacle. Flipping
+it mid-stream applies at once, in both directions, and the choice persists.
+
 **The tab title says what the run is doing, and nothing else.** A turn on your
 own hardware can take a minute, so tabbing away is normal - and the tab said
 "RSConclave" whether a model was mid-thought or had finished ten minutes ago.

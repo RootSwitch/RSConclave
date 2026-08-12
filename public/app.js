@@ -80,6 +80,30 @@ function renderEntryText(container, text, entryKind) {
   }
 }
 
+/*
+ * What a streaming entry shows while "hide reasoning" is on: the prose, with
+ * every <think> block - closed or still open - removed.
+ *
+ * Live reasoning is scratch work, and some models are neurotic out loud:
+ * debating tone, reminding themselves what they are, second-guessing a
+ * finished answer. Watching that in real time is distracting at best. This is
+ * DISPLAY-ONLY - every token still lands in the entry, and the completed card
+ * still carries the full fold - so hiding costs nothing but the spectacle.
+ *
+ * The trailing-fragment trim stops a half-arrived "<thi" from flashing as
+ * literal text for one token before the rest of the tag lands.
+ */
+function visibleDuringStream(text) {
+  const closed = text.replace(/<think>[\s\S]*?<\/think>/g, '');
+  const open = closed.indexOf('<think>');
+  let visible = open === -1 ? closed : closed.slice(0, open);
+  const lt = visible.lastIndexOf('<');
+  if (lt !== -1 && lt >= visible.length - 7 && '<think>'.startsWith(visible.slice(lt))) {
+    visible = visible.slice(0, lt);
+  }
+  return visible.replace(/^\s+/, '');
+}
+
 /**
  * Is this entry finished?
  *
@@ -695,6 +719,8 @@ const App = {
   tagFilter: null,      // one tag at a time, or null for everything
   selecting: false,     // sidebar is in pick-several-to-delete mode
   selected: new Set(),  // session ids ticked while selecting
+  hideThinking: localStorage.getItem('rsconclave.hideThinking') === '1',
+  streamBuf: new Map(), // entryId -> full streamed text; the pill reads this when hiding
   modelInfoByEndpoint: {}, // endpointId -> { model: {contextLength, numCtx} }
   session: null, // session currently shown (active run or a loaded historical one)
   runState: { sessionId: null, phase: 'idle' },
@@ -733,23 +759,35 @@ const App = {
   },
 
   appendToken(entryId, delta) {
+    let full = null;
     if (this.session) {
       const e = this.session.entries.find((x) => x.id === entryId);
-      if (e) e.text += delta;
+      if (e) { e.text += delta; full = e.text; }
     }
     const node = document.querySelector(`[data-entry-body="${entryId}"]`);
     if (node) {
+      /*
+       * The full stream is tracked separately from the DOM because the DOM may
+       * be FILTERED: with "hide reasoning" on, the node shows only prose, so
+       * neither the pill nor a later toggle-off could recover the reasoning
+       * from node.textContent. The entry (when the session is loaded) is the
+       * authority; the buffer covers the gap when it is not.
+       */
+      if (full === null) full = (this.streamBuf.get(entryId) ?? node.textContent) + delta;
+      this.streamBuf.set(entryId, full);
       const scroller = node.closest('.transcript-scroll, .view-scroll');
       const nearBottom = scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
-      node.textContent += delta;
+      if (this.hideThinking) node.textContent = visibleDuringStream(full);
+      else node.textContent += delta;
       if (scroller && nearBottom) scroller.scrollTop = scroller.scrollHeight;
       // Cards only re-render on entry/state events, never per token - so the
       // reasoning/streaming pill would otherwise stay whatever it was when
-      // the card was stamped, before any tokens existed.
+      // the card was stamped, before any tokens existed. It reads the FULL
+      // text: with reasoning hidden, the visible text is exactly the part
+      // with no <think> in it, and the pill would never say "reasoning" again.
       const pill = node.closest('.card')?.querySelector('.badge.busy');
       if (pill) {
-        const t = node.textContent;
-        pill.textContent = t.includes('<think>') && !t.includes('</think>') ? 'reasoning' : 'streaming';
+        pill.textContent = full.includes('<think>') && !full.includes('</think>') ? 'reasoning' : 'streaming';
       }
     }
   },
@@ -1166,6 +1204,7 @@ function connectSse() {
 
   es.addEventListener('entry', (ev) => {
     const entry = JSON.parse(ev.data);
+    App.streamBuf.delete(entry.id); // the entry now carries its own full text
     if (App.session && App.runState.sessionId === App.session.id) {
       App.upsertEntry(entry);
       currentViewRenderContent();
@@ -1369,6 +1408,24 @@ async function init() {
   initThemePicker();
   initDrawer();
   initSidebarResize();
+  /*
+   * The hide-reasoning toggle lives in the status strip because that is the
+   * only thing on screen at the exact moment the reasoning is streaming past.
+   * Flipping it mid-stream re-renders the live bubble at once - waiting for
+   * the next token would usually be imperceptible, but the one time it is not
+   * is a model sitting silent inside a long think, which is exactly when
+   * someone reaches for this.
+   */
+  const hideBox = document.getElementById('hide-think-box');
+  hideBox.checked = App.hideThinking;
+  hideBox.addEventListener('change', () => {
+    App.hideThinking = hideBox.checked;
+    try { localStorage.setItem('rsconclave.hideThinking', App.hideThinking ? '1' : '0'); } catch {}
+    const live = App.session?.entries.at(-1);
+    if (App.runState.phase !== 'generating' || !live) return;
+    const node = document.querySelector(`[data-entry-body="${live.id}"]`);
+    if (node) node.textContent = App.hideThinking ? visibleDuringStream(live.text) : live.text;
+  });
   document.getElementById('import-slot')?.replaceChildren(importSessionButton());
   initSearch();
 
