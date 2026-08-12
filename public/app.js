@@ -1023,38 +1023,47 @@ async function renderSessionList() {
  */
 const TITLE_APP = document.title;
 let titleLastPhase = 'idle';
-let titleFinishedUnseen = false;
+let titleWaitingUnseen = false;
 
+/*
+ * NOTHING FROM THE CONVERSATION GOES IN THE TAB TITLE.
+ *
+ * The first version put the session title and the speaking model up there,
+ * which read well in a wide tab and was wrong anyway: a tab title is one of
+ * the leakiest surfaces a browser has. It shows up in screenshots, screen
+ * shares, the alt-tab switcher, and browser history - places the prompt has no
+ * business being just because you looked away for a minute. It was also too
+ * long to survive the truncation a background tab applies.
+ *
+ * So: a marker and the app name, nothing else. The marker leads because tabs
+ * truncate from the right, which is also why every mail and chat client puts
+ * its unread count in front rather than behind.
+ */
 function renderTitle() {
   const st = App.runState;
   const running = st.phase === 'generating' || st.phase === 'auto_stepping';
   const wasRunning = titleLastPhase === 'generating' || titleLastPhase === 'auto_stepping';
-  // A run that ended while you were looking needs no marker - you saw it.
-  if (wasRunning && !running && document.hidden) titleFinishedUnseen = true;
-  if (running) titleFinishedUnseen = false;
+  // Finishing while you were watching is not news; you saw it happen.
+  if (wasRunning && !running && document.hidden) titleWaitingUnseen = true;
+  if (running) titleWaitingUnseen = false;
   titleLastPhase = st.phase;
 
-  let mark = '';
-  if (running) mark = `● ${st.currentSpeaker ?? 'working'} - `;
   /*
-   * Waiting on YOU - but only where that is news. A gated roundtable sits at
-   * awaiting_gate indefinitely until you press Step, which is worth a marker
-   * whether or not the tab is hidden. A chat rests in the same phase between
-   * every message, so marking that would pin "your turn" to the tab forever
-   * and teach you to ignore it.
+   * A gated roundtable waits on you indefinitely, so it counts as something
+   * waiting whether or not you were here when it stopped. Chat rests in the
+   * same phase between every message - marking that would pin the badge on
+   * permanently, which is the same as no badge at all.
    */
-  else if (st.phase === 'awaiting_gate' && st.mode === 'roundtable') mark = '⏸ your turn - ';
-  else if (titleFinishedUnseen) mark = '✓ ready - ';
-
-  const name = App.session?.title?.trim();
-  const middle = name ? `${name.length > 40 ? name.slice(0, 39) + '…' : name} - ` : '';
-  document.title = mark + middle + TITLE_APP;
+  const gateWaiting = st.phase === 'awaiting_gate' && st.mode === 'roundtable';
+  if (gateWaiting || titleWaitingUnseen) document.title = `(1) ${TITLE_APP}`;
+  else if (running) document.title = `● ${TITLE_APP}`;
+  else document.title = TITLE_APP;
 }
 
 // Coming back to the tab IS the acknowledgement; nothing else clears it.
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
-    titleFinishedUnseen = false;
+    titleWaitingUnseen = false;
     renderTitle();
   }
 });
