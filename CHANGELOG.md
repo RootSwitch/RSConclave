@@ -16,7 +16,9 @@ extrapolating that slope produced - and with --apply, BAKED - a num_ctx of
 1.2 million into a model trained for far less. The old behaviour printed a
 warning next to the number and applied it anyway. The trained maximum now
 comes from /api/show and caps both the recommendation and the bake; the
-report says which ceiling won.
+report says which ceiling won. Token counts also carry their human name
+("131072  (128k)") - a missing digit hides in plain sight, which is how a
+1.2M recommendation got waved through as hundred-k-ish.
 
 **The login card leads with the mark.** It carried the app name in plain text,
 which reads as a placeholder next to the rest of the suite - every sibling app

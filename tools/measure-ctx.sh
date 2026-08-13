@@ -102,6 +102,15 @@ curl -sf -m 60 -X POST "$HOST/api/generate" -H 'content-type: application/json' 
 [ -n "$LOW_OUT" ] && [ -n "$HIGH_OUT" ] || { echo "could not read /api/ps for $MODEL" >&2; exit 1; }
 
 REPORT=$(awk -v lo="$LOW" -v hi="$HIGH" -v lo_out="$LOW_OUT" -v hi_out="$HIGH_OUT" -v vram="$VRAM_GB" -v model="$MODEL" -v trained="$TRAINED" '
+# 262144 reads as noise next to 1216512 - a missing digit hides in plain
+# sight, which is how a 1.2M recommendation got waved through as "about
+# 100k-ish". Numbers keep their raw form (the --apply grep depends on the
+# integer coming first) with the human name alongside.
+function fmt(n) {
+    if (n >= 1048576) return sprintf("%.1fM", n / 1048576);
+    if (n >= 1024)    return sprintf("%dk", int(n / 1024 + 0.5));
+    return sprintf("%d", n);
+}
 BEGIN {
     split(lo_out, a, " "); split(hi_out, b, " ");
     lo_total = a[1]; lo_vram = a[2];
@@ -142,11 +151,11 @@ BEGIN {
     if (trained > 0 && p > trained) {
         p = int(trained / 4096) * 4096;
         if (p < 2048) p = trained;
-        printf "\n  Recommended num_ctx     : %d (capped at the trained maximum)\n", p;
-        printf "  (VRAM alone would allow roughly %d tokens - the model would not)\n", int(max_ctx);
+        printf "\n  Recommended num_ctx     : %d  (%s - capped at the trained maximum)\n", p, fmt(p);
+        printf "  (VRAM alone would allow roughly %s tokens - the model would not)\n", int(max_ctx) >= 0 ? fmt(int(max_ctx)) : "?";
     } else {
-        printf "\n  Recommended num_ctx     : %d\n", p;
-        printf "  (fully resident up to roughly %d tokens)\n", int(max_ctx);
+        printf "\n  Recommended num_ctx     : %d  (%s)\n", p, fmt(p);
+        printf "  (fully resident up to roughly %s tokens)\n", fmt(int(max_ctx));
     }
     if (trained == 0 && p >= 131072) printf "  Could not read the trained maximum - check ollama show %s before trusting this.\n", model;
     printf "\nSet it per seat in RSConclave, or bake it in for every client:\n";
