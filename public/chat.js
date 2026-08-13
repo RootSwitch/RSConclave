@@ -33,14 +33,7 @@ const Chat = {
         el('a', { href: `/api/sessions/${session.id}/export.md`, download: '' }, el('button', {}, 'Export markdown')),
         el('a', { href: `/api/sessions/${session.id}`, target: '_blank' }, el('button', {}, 'View JSON')),
         cloneButton(session),
-        !App.isActiveSession()
-          ? el('button', { class: 'primary', onclick: async () => {
-              try {
-                await Api.resumeSession(session.id);
-                await openSession(session.id);
-              } catch (err) { alert(err.message); }
-            } }, 'Resume')
-          : null,
+        !App.isActiveSession() ? resumeButton(session.id) : null,
       ),
       this.buildBrief(session),
     );
@@ -248,7 +241,9 @@ const Chat = {
     this.composeBar.replaceChildren();
 
     if (!App.isActiveSession()) {
-      this.composeBar.append(el('div', { class: 'muted' }, 'not the active session - use Resume to continue it'));
+      this.composeBar.append(el('div', { class: 'row' },
+        el('span', { class: 'muted' }, 'not the active session'),
+        resumeButton(session.id)));
       return;
     }
 

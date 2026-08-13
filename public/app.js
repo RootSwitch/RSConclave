@@ -430,6 +430,23 @@ function pickBallotOption(text, options) {
   return best ? best.option : null;
 }
 
+/*
+ * Resume, wherever it is needed. It began as one button in the session
+ * header, which is exactly the wrong place for it: a stopped 8k-token chat
+ * reopens scrolled to the bottom, where the fixed bottom bar was spending its
+ * permanently-visible position on a note telling you to scroll up and find
+ * this button. The bar now holds the button itself; the note was directions
+ * to it.
+ */
+function resumeButton(sessionId) {
+  return el('button', { class: 'primary', onclick: async () => {
+    try {
+      await Api.resumeSession(sessionId);
+      await openSession(sessionId);
+    } catch (err) { alert(err.message); }
+  } }, 'Resume');
+}
+
 function copyButton(getText) {
   return el('button', { class: 'mini', title: 'copy text', onclick: (ev) => {
     navigator.clipboard.writeText(getText()).then(() => {

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**Resume lives at the bottom too.** A stopped long chat reopens scrolled to
+the end, where the fixed bottom bar was spending its permanently-visible
+position on a note telling you to scroll all the way up and find the Resume
+button. The bar now holds the button itself, in chat and roundtable both. This
+also settled a contradiction: a finished roundtable's gate bar said "use
+Resume to continue it" while the header deliberately hid Resume for status
+'done' - directions to a button that did not exist.
+
 **Hide reasoning while it streams.** Live reasoning is scratch work, and some
 models are neurotic out loud - debating tone, reminding themselves what they
 are, second-guessing an answer they already finished. A "hide reasoning"

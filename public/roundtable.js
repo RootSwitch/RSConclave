@@ -41,14 +41,14 @@ const Roundtable = {
         el('a', { href: `/api/sessions/${session.id}/export.md`, download: '' }, el('button', {}, 'Export markdown')),
         el('a', { href: `/api/sessions/${session.id}`, target: '_blank' }, el('button', {}, 'View JSON')),
         cloneButton(session),
-        !App.isActiveSession() && session.status !== 'done'
-          ? el('button', { class: 'primary', onclick: async () => {
-              try {
-                await Api.resumeSession(session.id);
-                await openSession(session.id);
-              } catch (err) { alert(err.message); }
-            } }, 'Resume')
-          : null,
+        /*
+         * Including status 'done'. The old guard hid Resume on a finished
+         * roundtable while the gate bar below said "use Resume to continue
+         * it" - directions to a button that did not exist. A roundtable is
+         * never finished in a way that forbids more turns (the engine resumes
+         * any owned session), so the guard was wrong, not the bar.
+         */
+        !App.isActiveSession() ? resumeButton(session.id) : null,
       ),
       this.buildBrief(session),
       this.buildJudgeSection(session),
@@ -490,10 +490,9 @@ const Roundtable = {
     this.gateBar.replaceChildren();
 
     if (!isActive) {
-      this.gateBar.append(el('div', { class: 'muted' },
-        session.status === 'done' || session.status === 'stopped' || session.status === 'paused'
-          ? `session ${session.status} - use Resume to continue it`
-          : 'not the active session'));
+      this.gateBar.append(el('div', { class: 'row' },
+        el('span', { class: 'muted' }, `session ${session.status}`),
+        resumeButton(session.id)));
       return;
     }
 
