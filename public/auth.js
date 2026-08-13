@@ -55,7 +55,14 @@ const Auth = {
 
     this.overlay = el('div', { id: 'auth-overlay' },
       el('div', { class: 'auth-card' },
+        /*
+         * The mark, not just the name. The login card is the first thing a
+         * new person sees and the suite's other apps all lead with their icon
+         * there - text alone reads as a placeholder. Decorative next to the
+         * visible name, so alt stays empty for screen readers.
+         */
         el('div', { class: 'row', style: 'justify-content: center' },
+          el('img', { src: '/favicon.svg', alt: '', width: '28', height: '28' }),
           el('span', { class: 'brand-name', style: 'font-size: 16px; font-weight: 600' }, 'RSConclave')),
         el('div', { class: 'muted', style: 'text-align: center' },
           needsSetup

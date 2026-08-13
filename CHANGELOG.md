@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+**The login card leads with the mark.** It carried the app name in plain text,
+which reads as a placeholder next to the rest of the suite - every sibling app
+opens its login with the icon beside the name. The favicon already on every
+page now sits in the card header too.
+
 **Resume lives at the bottom too.** A stopped long chat reopens scrolled to
 the end, where the fixed bottom bar was spending its permanently-visible
 position on a note telling you to scroll all the way up and find the Resume
