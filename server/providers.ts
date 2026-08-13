@@ -54,7 +54,22 @@ export function parseModelInfo(data: any): ModelInfo {
   return { contextLength, numCtx };
 }
 
-const modelInfoCache = new Map<string, ModelInfo>();
+/*
+ * Cached so the context meter does not pay an /api/show round trip on every
+ * turn - but no longer cached FOREVER. A Modelfile is not immutable:
+ * measure-ctx.sh --apply bakes a new num_ctx into the model on the box, and a
+ * forever-cache kept reporting the pre-bake default until the server was
+ * restarted. Deleting and re-adding the endpoint did not help, because the key
+ * is the base URL and model name, which a re-add does not change - exactly the
+ * recovery a reasonable person tries first. Five minutes keeps the per-turn
+ * saving; clearModelInfoCache() covers "I just changed it, ask again".
+ */
+const MODEL_INFO_TTL_MS = 5 * 60 * 1000;
+const modelInfoCache = new Map<string, { info: ModelInfo; at: number }>();
+
+export function clearModelInfoCache(): void {
+  modelInfoCache.clear();
+}
 
 /** Context info for a model (Ollama only; cached). Returns null when unavailable. */
 export async function getModelInfo(endpoint: Endpoint, model: string): Promise<ModelInfo | null> {
@@ -62,7 +77,7 @@ export async function getModelInfo(endpoint: Endpoint, model: string): Promise<M
   const base = endpoint.baseUrl.replace(/\/+$/, '');
   const key = `${base}|${model}`;
   const cached = modelInfoCache.get(key);
-  if (cached) return cached;
+  if (cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.info;
   try {
     const res = await fetch(`${base}/api/show`, {
       method: 'POST',
@@ -72,7 +87,7 @@ export async function getModelInfo(endpoint: Endpoint, model: string): Promise<M
     });
     if (!res.ok) return null;
     const info = parseModelInfo(await res.json());
-    modelInfoCache.set(key, info);
+    modelInfoCache.set(key, { info, at: Date.now() });
     return info;
   } catch {
     return null;

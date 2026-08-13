@@ -8,7 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { BIG_BODY, dispatch, readJsonBody, route, sendJson, HttpError, SMALL_BODY } from './router.ts';
 import { serveStatic } from './static.ts';
 import { handleSse, onConnectSnapshot } from './sse.ts';
-import { discoverModels, getModelInfo } from './providers.ts';
+import { clearModelInfoCache, discoverModels, getModelInfo } from './providers.ts';
 import * as store from './store.ts';
 import * as engine from './engine.ts';
 import * as rt from './roundtable.ts';
@@ -205,6 +205,12 @@ route('PUT', '/api/config', async (req, res) => {
     return out;
   });
   store.save('config', { endpoints });
+  /*
+   * Saving endpoints is the move people make right after changing something
+   * about a model - including re-adding an endpoint specifically to force a
+   * re-read. Make that instinct correct instead of a five-minute wait.
+   */
+  clearModelInfoCache();
   sendJson(res, 200, { ok: true });
 });
 

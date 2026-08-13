@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+**A re-baked model shows its new context without a server restart.** The
+context info from /api/show was cached forever, so after measure-ctx.sh
+--apply changed a model's num_ctx on the box, the app kept showing the
+pre-bake default - and deleting and re-adding the endpoint did not help,
+because the cache is keyed by base URL and model name, which a re-add does
+not change. The cache now expires after five minutes, and saving endpoints
+in Settings clears it immediately, so the re-add instinct works.
+
+**measure-ctx.sh no longer recommends more context than the model was
+trained for.** A sliding-window model costs almost nothing per token, and
+extrapolating that slope produced - and with --apply, BAKED - a num_ctx of
+1.2 million into a model trained for far less. The old behaviour printed a
+warning next to the number and applied it anyway. The trained maximum now
+comes from /api/show and caps both the recommendation and the bake; the
+report says which ceiling won.
+
 **The login card leads with the mark.** It carried the app name in plain text,
 which reads as a placeholder next to the rest of the suite - every sibling app
 opens its login with the icon beside the name. The favicon already on every

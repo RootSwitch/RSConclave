@@ -82,6 +82,14 @@ probe() { # $1 = num_ctx -> prints "total_bytes vram_bytes"
         sed -n 's/.*"size":\([0-9]*\).*"size_vram":\([0-9]*\).*/\1 \2/p'
 }
 
+# The trained maximum, so the recommendation can be capped by it. A model
+# with sliding-window or hybrid attention costs almost nothing per token, and
+# extrapolating that slope recommended (and with --apply, BAKED) a num_ctx of
+# 1.2 million into a model trained for far less. The warning that printed
+# alongside was not a substitute for just not doing it.
+TRAINED=$(curl -sf -m 30 -X POST "$HOST/api/show" -H 'content-type: application/json'     -d "{\"model\":\"$MODEL\"}" | grep -o '"[^"]*\.context_length":[0-9]*' | head -1 | grep -o '[0-9]*$')
+[ -n "$TRAINED" ] || TRAINED=0
+
 echo "probing $MODEL at num_ctx=$LOW ..."
 LOW_OUT=$(probe "$LOW")
 echo "probing $MODEL at num_ctx=$HIGH ..."
@@ -93,7 +101,7 @@ curl -sf -m 60 -X POST "$HOST/api/generate" -H 'content-type: application/json' 
 
 [ -n "$LOW_OUT" ] && [ -n "$HIGH_OUT" ] || { echo "could not read /api/ps for $MODEL" >&2; exit 1; }
 
-REPORT=$(awk -v lo="$LOW" -v hi="$HIGH" -v lo_out="$LOW_OUT" -v hi_out="$HIGH_OUT" -v vram="$VRAM_GB" -v model="$MODEL" '
+REPORT=$(awk -v lo="$LOW" -v hi="$HIGH" -v lo_out="$LOW_OUT" -v hi_out="$HIGH_OUT" -v vram="$VRAM_GB" -v model="$MODEL" -v trained="$TRAINED" '
 BEGIN {
     split(lo_out, a, " "); split(hi_out, b, " ");
     lo_total = a[1]; lo_vram = a[2];
@@ -127,9 +135,20 @@ BEGIN {
     p = int(max_ctx / 4096) * 4096;
     if (p < 2048) p = 2048;
 
-    printf "\n  Recommended num_ctx     : %d\n", p;
-    printf "  (fully resident up to roughly %d tokens)\n", int(max_ctx);
-    if (p >= 131072) printf "  That is at or beyond most models trained maximum - check ollama show %s.\n", model;
+    # VRAM is only one ceiling; the training window is the other. Past it the
+    # model does not work at that length no matter how much memory is free,
+    # so the smaller of the two is the honest answer - and the one --apply
+    # bakes in.
+    if (trained > 0 && p > trained) {
+        p = int(trained / 4096) * 4096;
+        if (p < 2048) p = trained;
+        printf "\n  Recommended num_ctx     : %d (capped at the trained maximum)\n", p;
+        printf "  (VRAM alone would allow roughly %d tokens - the model would not)\n", int(max_ctx);
+    } else {
+        printf "\n  Recommended num_ctx     : %d\n", p;
+        printf "  (fully resident up to roughly %d tokens)\n", int(max_ctx);
+    }
+    if (trained == 0 && p >= 131072) printf "  Could not read the trained maximum - check ollama show %s before trusting this.\n", model;
     printf "\nSet it per seat in RSConclave, or bake it in for every client:\n";
     printf "  printf '"'"'FROM %s\\nPARAMETER num_ctx %d\\n'"'"' > mf && ollama create %s -f mf\n", model, p, model;
 }')
