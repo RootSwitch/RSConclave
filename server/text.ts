@@ -44,7 +44,12 @@ export function incompleteNote(e: TranscriptEntry): string {
   if (e.error === 'cancelled') return ' (INCOMPLETE - CANCELLED PART-WAY)';
   // A dropped stream leaves a turn just as unfinished as a cancelled one, and
   // a consolidator reading it deserves to know it is judging half an answer.
-  if (e.error && e.truncated) return ' (INCOMPLETE - CUT OFF PART-WAY)';
+  //
+  // Truncation alone is enough - requiring an error too silently exempted the
+  // commonest case of all. A turn that hits its output cap sets truncated and
+  // no error (nothing went wrong, it just ran out of budget), so it reached
+  // the consolidator labelled as a finished answer and got weighed as one.
+  if (e.truncated) return ' (INCOMPLETE - CUT OFF PART-WAY)';
   return '';
 }
 

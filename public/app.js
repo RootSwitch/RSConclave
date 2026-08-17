@@ -324,6 +324,29 @@ function entryStatus(entry, complete) {
     const reasoning = entry.text.includes('<think>') && !entry.text.includes('</think>');
     return [el('span', { class: 'badge busy' }, reasoning ? 'reasoning' : 'streaming')];
   }
+  /*
+   * A turn that stopped short is not a finished one, however ordinary the text
+   * looks. It used to take the same green 'done' pill as a complete answer, so
+   * a model that hit its output cap or died mid-stream was indistinguishable
+   * on screen from one that finished - the transcript said the consolidator
+   * had been told, and the reader had not.
+   *
+   * Cancelled is handled above and keeps its own wording, because the user
+   * already knows why that one stopped.
+   */
+  if (entry.truncated) {
+    const out = [el('span', { class: 'sev warn',
+      // The error text when there is one names the ending: a dropped stream
+      // reads differently from a budget that ran out, and the difference is
+      // the whole diagnosis.
+      title: `${entry.error ?? 'Stopped at its output limit'}. The partial text is kept here to read and copy, but it is not sent as context to later turns.`,
+    }, 'incomplete')];
+    // Stats stay: how far it got before stopping is the first thing you want
+    // to know, and it is what a raised max out has to be measured against.
+    const st = statsLine(entry.stats);
+    if (st) out.push(el('span', { class: 'stats' }, st));
+    return out;
+  }
   const out = [el('span', { class: 'badge ok' }, 'done')];
   const s = statsLine(entry.stats);
   if (s) out.push(el('span', { class: 'stats' }, s));

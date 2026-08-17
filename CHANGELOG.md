@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+**A turn that stopped short says so on screen, not just to the consolidator.**
+A council member that hit its output cap or died mid-stream took the same green
+"done" pill as one that answered in full. The transcript handed to the
+consolidator carried the marker; the person reading the screen got nothing, so
+the only way to find out a model had stopped early was to count tokens or go
+digging in the server's logs. Those turns now show an amber **incomplete** pill
+with the token count beside it, and hovering says which ending it was - a
+dropped stream reads differently from a budget that ran out, and the difference
+is the whole diagnosis. Councils and pipelines; chat already offered Continue,
+which said the same thing.
+
+**A model that hit its output cap was described to the consolidator as
+finished.** The label needed both an error and a truncation flag, and hitting
+the cap sets only the flag, because nothing went wrong - the model just ran out
+of budget. That is the commonest way a turn ends unfinished, and it was the one
+case that went unmarked, so the consolidator weighed half an answer as a whole
+one. Truncation alone is now enough. Cancelled turns keep their own wording.
+
 **measure-ctx.sh sizes against free VRAM, not the sticker on the card.** It
 budgeted against the card's total capacity, which is the right number only on
 an idle box - and in a council it routinely is not, because each model stays

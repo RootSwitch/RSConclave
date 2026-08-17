@@ -49,9 +49,21 @@ test('isFinishedTurn: user text is not think-stripped, so a literal tag still co
   assert.equal(isFinishedTurn(entry({ kind: 'user', text: '<think>what does this tag do?' })), true);
 });
 
-test('incompleteNote: marks cancelled only', () => {
+test('incompleteNote: every ending that leaves an answer unfinished is marked', () => {
   assert.equal(incompleteNote(cancelled({ text: 'x' })), ' (INCOMPLETE - CANCELLED PART-WAY)');
   assert.equal(incompleteNote(entry({ text: 'x' })), '');
+  // A dropped stream: an error string AND truncated.
+  assert.equal(
+    incompleteNote(entry({ text: 'x', truncated: true, error: 'the stream ended before the model finished' })),
+    ' (INCOMPLETE - CUT OFF PART-WAY)',
+  );
+  // The output cap: truncated with NO error, because nothing went wrong - it
+  // just ran out of budget. This is the common case, and requiring an error
+  // alongside truncated used to let it reach the consolidator unmarked.
+  assert.equal(
+    incompleteNote(entry({ text: 'x', truncated: true })),
+    ' (INCOMPLETE - CUT OFF PART-WAY)',
+  );
 });
 
 /* ---------- the four conversational histories all withhold it ---------- */

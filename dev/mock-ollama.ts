@@ -46,6 +46,7 @@ const server = http.createServer(async (req, res) => {
     for await (const c of req) chunks.push(c as Buffer);
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     const model: string = body.model ?? 'unknown';
+    const numPredict: number = Number(body.options?.num_predict ?? 0) || 0;
     res.writeHead(200, { 'content-type': 'application/x-ndjson' });
 
     let aborted = false;
@@ -86,9 +87,19 @@ const server = http.createServer(async (req, res) => {
       // what the client cannot tell from a finished answer. A destroyed socket
       // makes fetch throw and already surfaces as an error.
       if (model.startsWith('mock-cutoff') && count > 6) return res.end();
+      /*
+       * The output cap. Real Ollama stops at num_predict and says
+       * done_reason "length"; the mock ignored it and always finished
+       * cleanly, so the commonest way a turn ends unfinished had no way to
+       * be reproduced here at all.
+       */
+      if (numPredict > 0 && count >= numPredict) {
+        res.write(JSON.stringify({ model, message: { role: 'assistant', content: '' }, done: true, done_reason: 'length', eval_count: count, total_duration: count * 33e6 }) + '\n');
+        return res.end();
+      }
       await sleep(33);
     }
-    res.write(JSON.stringify({ model, message: { role: 'assistant', content: '' }, done: true, eval_count: count, total_duration: count * 33e6 }) + '\n');
+    res.write(JSON.stringify({ model, message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', eval_count: count, total_duration: count * 33e6 }) + '\n');
     res.end();
     return;
   }
