@@ -636,6 +636,12 @@ route('POST', '/api/cancel', (req, res) => {
   engine.cancelGeneration(userOf(req));
   sendJson(res, 200, { ok: true });
 });
+// Abandon the member being generated and move to the next one. Council only -
+// see engine.skipMember for why the other modes have nothing to skip to.
+route('POST', '/api/council/skip', (req, res) => {
+  engine.skipMember(userOf(req));
+  sendJson(res, 200, { ok: true });
+});
 route('GET', '/api/state', (req, res) => {
   sendJson(res, 200, engine.getState(userOf(req)));
 });

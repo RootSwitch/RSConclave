@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+**One slow model no longer costs you the whole council.** Cancel was the only
+way out of a member that was crawling, and it ends the run - so abandoning the
+third of five seats threw away the two answers already collected, recoverable
+only by copying them into a consolidator by hand. Councils now have **Skip**
+next to Cancel while a member is generating: it drops that member, moves to
+the next one, keeps everything already answered, and still consolidates at the
+end. The skipped seat is reported to the consolidator as `(skipped)` rather
+than as its half-finished text, because skip means you did not want that
+opinion counted. Cancel is unchanged and still stops everything. Council only
+- a roundtable turn feeds the next speaker and a pipeline stage feeds the next
+stage, so there is nothing to carry on to.
+
 **A stream that dies mid-answer says so.** Every ordinary ending - finished,
 hit the token cap, hit a stop sequence - arrives as a final frame from the
 provider. A connection that closes mid-generation instead (an OOM-killed

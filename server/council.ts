@@ -25,6 +25,18 @@ export function renderResponses(config: CouncilConfig, entries: TranscriptEntry[
      * strips think first (see isFinishedTurn), and this one was missed.
      */
     const answer = entry ? stripThink(entry.text).trim() : '';
+    /*
+     * A skipped member is reported as skipped even when it had produced
+     * something. Skip means "I do not want this one" - handing its half-answer
+     * to the consolidator anyway would weigh an opinion the user rejected. The
+     * text stays in the transcript to read or copy; it just does not vote.
+     */
+    if (entry?.error === 'skipped') {
+      blocks.push(`=== RESPONSE FROM: ${m.model} ===
+(skipped)
+=== END RESPONSE ===`);
+      continue;
+    }
     if (entry && entry.kind !== 'error' && answer) {
       // Labelled format, so a cancelled partial is included and marked rather
       // than reported as "no response" for text the user can see on screen.

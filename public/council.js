@@ -511,7 +511,25 @@ const Council = {
         Api.councilRerunMember(session.id, entry.memberIndex).catch((e) => alert(e.message)) }, 'Re-run'));
     }
     if (generating && !complete) {
-      actions.push(el('button', { class: 'mini danger', onclick: () => Api.cancel().catch(() => {}) }, 'Cancel'));
+      /*
+       * Two ways out of a member that is not going well, and the difference
+       * matters: Skip abandons this one and lets the rest of the council
+       * answer, Cancel ends the whole run. Cancel used to be the only option,
+       * so one model crawling cost you every answer already collected.
+       * Consolidation is the exception - there is nothing after it to skip to.
+       */
+      if (!isConsolidation) {
+        actions.push(el('button', {
+          class: 'mini',
+          title: 'Give up on this model and move to the next member. The answers already collected are kept.',
+          onclick: () => Api.councilSkip().catch((e) => alert(e.message)),
+        }, 'Skip'));
+      }
+      actions.push(el('button', {
+        class: 'mini danger',
+        title: 'Stop the whole council here.',
+        onclick: () => Api.cancel().catch(() => {}),
+      }, 'Cancel'));
     }
 
     const body = el('div', { class: 'card-body', dataset: { entryBody: entry.id } });

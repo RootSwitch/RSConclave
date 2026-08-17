@@ -103,5 +103,6 @@ const Api = {
   getPs: () => Api._json('/api/ps'),
 
   cancel: () => Api._post('/api/cancel'),
+  councilSkip: () => Api._post('/api/council/skip'),
   getState: () => Api._json('/api/state'),
 };

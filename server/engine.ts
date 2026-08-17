@@ -37,6 +37,12 @@ interface Active {
   abort: AbortController | null;
   autoRemaining: number;
   pauseRequested: boolean;
+  /*
+   * Abandon the CURRENT member and carry on down the list, as opposed to
+   * pauseRequested which ends the run. One slow model should not cost you the
+   * answers the others already gave.
+   */
+  skipRequested?: boolean;
   phase: RunState['phase'];
   currentSpeaker?: string;
   waitingFirstToken: boolean;
@@ -400,7 +406,10 @@ async function runTurn(a: Active, opts: {
       : undefined;
   } catch (err: any) {
     if (a.abort?.signal.aborted) {
-      entry.error = 'cancelled';
+      // Same abort, two different intentions - and the transcript should say
+      // which, because "I gave up on this model" and "I stopped the run" read
+      // very differently a week later.
+      entry.error = a.skipRequested ? 'skipped' : 'cancelled';
     } else {
       /*
        * A failed CONTINUE must not condemn the reply it was extending. The
@@ -499,6 +508,12 @@ async function runCouncil(): Promise<void> {
     // council. Roundtable and pipeline already stopped on cancel - this one
     // carried on through every remaining member and then consolidated, which
     // is the opposite of what pressing Cancel looks like it should do.
+    if (entry.error === 'skipped') {
+      // Consumed here, not in skipMember: the flag has to survive until the
+      // aborted turn has finished unwinding and labelled its entry.
+      a.skipRequested = false;
+      continue;
+    }
     if (entry.error === 'cancelled') {
       a.pauseRequested = true;
       break;
@@ -1173,5 +1188,25 @@ export function evictUser(username: string): void {
 
 export function cancelGeneration(username: string): void {
   const a = assertOwn(username);
+  a.skipRequested = false; // an explicit Cancel overrides a pending Skip
+  a.abort?.abort();
+}
+
+/*
+ * Abandon this member, keep the council going.
+ *
+ * Cancel stops the whole run, which is right when you want it and expensive
+ * when you do not: one model crawling at two tokens a second used to cost you
+ * every answer the others had already produced, recoverable only by copying
+ * them into a consolidator by hand.
+ *
+ * Only councils have anything to skip TO. A roundtable turn feeds the next
+ * speaker and a pipeline stage feeds the next stage, so abandoning one there
+ * is not "carry on" - it is a different conversation.
+ */
+export function skipMember(username: string): void {
+  const a = assertOwn(username);
+  if (a.session.mode !== 'council') throw new InputError('only a council can skip a member');
+  a.skipRequested = true;
   a.abort?.abort();
 }

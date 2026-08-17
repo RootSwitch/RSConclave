@@ -51,6 +51,8 @@ and every transcript **exports** as markdown.
 - **Council of Elders** - send one prompt to a sequence of models, then a designated
   *consolidator* model reviews all labeled responses and synthesizes a final answer.
   Re-run individual members or just the consolidation (with an edited template) at any time.
+  **Skip** abandons a member that is crawling and moves to the next one, keeping the answers
+  already collected - Cancel, which ends the whole run, used to be the only way out.
   The same model can sit on the council more than once (the + on a model row) at different
   temperatures - self-consistency for free. After the synthesis, ask a **follow-up round**:
   every member answers the new question with its own previous answer as context. Give it a
