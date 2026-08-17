@@ -11,14 +11,27 @@
 # token for THIS model on THIS card, which extrapolates to the largest window
 # that still fits.
 #
-# Usage:
-#   ./measure-ctx.sh MODEL [--host URL] [--vram GB] [--low N] [--high N] [--apply]
+# The budget is what is FREE on the card, not what is printed on the box.
+# Those are the same number only when nothing else is loaded, and in a council
+# they routinely are not: a model stays resident for its keep_alive after its
+# turn, so the next one to load finds less room than an idle-box measurement
+# promised. A num_ctx that is genuinely safe standalone can then spill to
+# system RAM when it runs third in line. --assume-empty restores the old
+# behaviour of sizing against the whole card.
 #
-#   --host   Ollama base URL          (default: http://127.0.0.1:11434)
-#   --vram   usable VRAM budget in GB (default: auto-detect, else 24)
-#   --low    small probe context      (default: 2048)
-#   --high   large probe context      (default: 8192)
-#   --apply  bake the recommended num_ctx into the model via ollama create
+# The model being measured is unloaded first, so its own footprint never
+# counts against its own budget.
+#
+# Usage:
+#   ./measure-ctx.sh MODEL [--host URL] [--vram GB] [--low N] [--high N]
+#                          [--assume-empty] [--apply]
+#
+#   --host          Ollama base URL   (default: http://127.0.0.1:11434)
+#   --vram          usable VRAM budget in GB - skips detection entirely
+#   --low           small probe context      (default: 2048)
+#   --high          large probe context      (default: 8192)
+#   --assume-empty  budget against total VRAM rather than what is free now
+#   --apply         bake the recommended num_ctx into the model via ollama create
 #
 # Example:
 #   ./measure-ctx.sh qwen3-coder:30b --vram 24 --apply
@@ -36,6 +49,7 @@ LOW=2048
 HIGH=8192
 MODEL=""
 APPLY=0
+ASSUME_EMPTY=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -43,8 +57,9 @@ while [ $# -gt 0 ]; do
         --vram) VRAM_GB=$2; shift 2 ;;
         --low)  LOW=$2; shift 2 ;;
         --high) HIGH=$2; shift 2 ;;
+        --assume-empty) ASSUME_EMPTY=1; shift ;;
         --apply) APPLY=1; shift ;;
-        -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*) echo "unknown option: $1" >&2; exit 2 ;;
         *)  MODEL=$1; shift ;;
     esac
@@ -53,21 +68,80 @@ done
 [ -n "$MODEL" ] || { echo "usage: $0 MODEL [--host URL] [--vram GB]" >&2; exit 2; }
 command -v curl >/dev/null || { echo "curl is required" >&2; exit 1; }
 
-# Auto-detect the card's total VRAM. Both vendors, and a stated default if
-# neither tool is present - being explicit beats silently assuming.
-if [ -z "$VRAM_GB" ]; then
+# Both vendors report total and free; print "total_mb free_mb". The ROCm
+# columns are found by header name rather than position, because the order
+# has moved between rocm-smi versions and a positional guess that lands on
+# "used" instead of "total" is wrong by the whole card.
+gpu_mem() {
     if command -v nvidia-smi >/dev/null 2>&1; then
-        MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 || true)
+        nvidia-smi --query-gpu=memory.total,memory.free --format=csv,noheader,nounits 2>/dev/null |
+            head -1 | awk -F, '{gsub(/ /,""); print $1, $2}'
     elif command -v rocm-smi >/dev/null 2>&1; then
-        MB=$(rocm-smi --showmeminfo vram --csv 2>/dev/null | awk -F, 'NR==2 {print int($3/1048576)}' || true)
+        rocm-smi --showmeminfo vram --csv 2>/dev/null | awk -F, '
+            NR==1 { for (i=1;i<=NF;i++) { if ($i ~ /Total Memory/) t=i; if ($i ~ /Used Memory/) u=i } next }
+            NR==2 && t { printf "%d %d\n", int($t/1048576), u ? int(($t-$u)/1048576) : 0 }'
     fi
-    if [ -n "${MB:-}" ] && [ "${MB:-0}" -gt 0 ] 2>/dev/null; then
-        VRAM_GB=$((MB / 1024))
-        echo "detected ${VRAM_GB} GB of VRAM"
+}
+
+# Unload the model being measured BEFORE reading free VRAM. Left resident from
+# an earlier run it would count against its own budget, and the script would
+# recommend a window sized for the space left over beside itself.
+unload() {
+    curl -sf -m 60 -X POST "$HOST/api/generate" -H 'content-type: application/json' \
+        -d "{\"model\":\"$MODEL\",\"keep_alive\":0}" >/dev/null 2>&1 || true
+}
+
+# What else is holding the card, so a small budget explains itself instead of
+# just looking like a disappointing number.
+others() {
+    curl -sf -m 30 "$HOST/api/ps" 2>/dev/null | sed 's/{"name":/\n&/g' |
+        sed -n 's/.*{"name":"\([^"]*\)".*/\1/p' | grep -Fxv "$MODEL" || true
+}
+
+if [ -z "$VRAM_GB" ]; then
+    unload
+    # Freeing VRAM is not instant; wait for the model to actually leave /api/ps
+    # rather than sleeping a guessed interval.
+    i=0
+    while [ $i -lt 20 ]; do
+        curl -sf -m 10 "$HOST/api/ps" 2>/dev/null | grep -qF "\"$MODEL\"" || break
+        i=$((i + 1))
+        sleep 1
+    done
+
+    MEM=$(gpu_mem || true)
+    TOTAL_MB=$(printf '%s' "${MEM:-}" | awk '{print $1+0}')
+    FREE_MB=$(printf '%s' "${MEM:-}" | awk '{print $2+0}')
+
+    if [ "${TOTAL_MB:-0}" -gt 0 ] 2>/dev/null; then
+        if [ "$ASSUME_EMPTY" -eq 1 ]; then
+            VRAM_GB=$((TOTAL_MB / 1024))
+            BASIS=empty
+            echo "detected $((TOTAL_MB / 1024)) GB of VRAM; sizing for an empty card (--assume-empty)"
+        else
+            VRAM_GB=$((FREE_MB / 1024))
+            BASIS=free
+            echo "detected $((TOTAL_MB / 1024)) GB of VRAM, $((FREE_MB / 1024)) GB free"
+            RESIDENT=$(others)
+            if [ -n "$RESIDENT" ]; then
+                echo "  still loaded, and holding the rest:"
+                printf '    %s\n' $RESIDENT
+                echo "  budgeting against free VRAM. Unload them, or pass --assume-empty"
+                echo "  to size for an idle card."
+            fi
+            if [ "$VRAM_GB" -lt 1 ]; then
+                echo "less than 1 GB free - unload something, or pass --vram GB" >&2
+                exit 1
+            fi
+        fi
     else
         VRAM_GB=24
+        BASIS=guessed
         echo "could not detect VRAM; assuming ${VRAM_GB} GB (override with --vram)"
     fi
+else
+    BASIS=stated
+    echo "using the stated budget of ${VRAM_GB} GB (--vram)"
 fi
 
 probe() { # $1 = num_ctx -> prints "total_bytes vram_bytes"
@@ -96,12 +170,11 @@ echo "probing $MODEL at num_ctx=$HIGH ..."
 HIGH_OUT=$(probe "$HIGH")
 
 # release the card again; leaving a model pinned is rude on a shared box
-curl -sf -m 60 -X POST "$HOST/api/generate" -H 'content-type: application/json' \
-    -d "{\"model\":\"$MODEL\",\"keep_alive\":0}" >/dev/null 2>&1 || true
+unload
 
 [ -n "$LOW_OUT" ] && [ -n "$HIGH_OUT" ] || { echo "could not read /api/ps for $MODEL" >&2; exit 1; }
 
-REPORT=$(awk -v lo="$LOW" -v hi="$HIGH" -v lo_out="$LOW_OUT" -v hi_out="$HIGH_OUT" -v vram="$VRAM_GB" -v model="$MODEL" -v trained="$TRAINED" '
+REPORT=$(awk -v lo="$LOW" -v hi="$HIGH" -v lo_out="$LOW_OUT" -v hi_out="$HIGH_OUT" -v vram="$VRAM_GB" -v model="$MODEL" -v trained="$TRAINED" -v basis="$BASIS" '
 # 262144 reads as noise next to 1216512 - a missing digit hides in plain
 # sight, which is how a 1.2M recommendation got waved through as "about
 # 100k-ish". Numbers keep their raw form (the --apply grep depends on the
@@ -158,6 +231,18 @@ BEGIN {
         printf "  (fully resident up to roughly %s tokens)\n", fmt(int(max_ctx));
     }
     if (trained == 0 && p >= 131072) printf "  Could not read the trained maximum - check ollama show %s before trusting this.\n", model;
+    # Say which card the number describes, and do not claim to have measured
+    # a budget that was stated or guessed. Sized against free VRAM it holds
+    # only while the card stays this free - load something else beside it and
+    # the model spills, which is the failure this flag exists to describe.
+    if (basis == "empty")
+        printf "  Sized for an EMPTY %d GB card - it will spill if anything else is loaded.\n", vram;
+    else if (basis == "stated")
+        printf "  Sized against the stated budget of %d GB (--vram).\n", vram;
+    else if (basis == "guessed")
+        printf "  Sized against an ASSUMED %d GB - VRAM could not be detected.\n", vram;
+    else
+        printf "  Sized against the %d GB free at measurement time.\n", vram;
     printf "\nSet it per seat in RSConclave, or bake it in for every client:\n";
     printf "  printf '"'"'FROM %s\\nPARAMETER num_ctx %d\\n'"'"' > mf && ollama create %s -f mf\n", model, p, model;
 }')

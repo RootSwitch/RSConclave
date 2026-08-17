@@ -167,9 +167,13 @@ than tenfold. Measure your own instead:
 ```
 
 It loads the model at two context sizes, reads the real footprint from `/api/ps`, and reports
-bytes per token plus the largest window that stays fully GPU-resident. Add `--apply` and it
-bakes the number in for you - a rebuild over the same blobs, no re-download, and every client
-of that daemon gets the new default, not just RSConclave:
+bytes per token plus the largest window that stays fully GPU-resident. The budget is what is
+**free** on the card, not what is printed on the box - in a council a model stays resident for
+its keep-alive after its turn, so the next one to load finds less room, and a `num_ctx` that is
+safe standalone can spill to system RAM when it runs third in line. Pass `--assume-empty` to
+size for an idle card. Add `--apply` and it bakes the number in for you - a rebuild over the
+same blobs, no re-download, and every client of that daemon gets the new default, not just
+RSConclave:
 
 ```bash
 ./tools/measure-ctx.sh qwen3-coder:30b --vram 24 --apply

@@ -347,6 +347,15 @@ It loads the model at two context sizes, reads the real footprint from
 Ollama's `/api/ps`, and reports bytes per token plus the largest window that
 stays fully on the GPU - then prints the Modelfile line to bake it in.
 
+It budgets against **free** VRAM, not the card's nameplate size. Those are the
+same number only on an idle box, and in a council they routinely are not: each
+model stays resident for its keep-alive after its turn, so the next one to load
+finds less room than an idle measurement promised. The symptom is a model that
+runs fully on the GPU when you test it alone and quietly spills to system RAM
+when it runs third in a council - same `num_ctx`, a fraction of the speed.
+`ollama ps` shows it as a `CPU/GPU` split in the `PROCESSOR` column. Pass
+`--assume-empty` if you want the old whole-card behaviour.
+
 **Why this matters more than it sounds:** Ollama's default context is small
 (4096 unless a Modelfile says otherwise), and when a prompt exceeds the
 window it is **silently truncated from the front** - which is where the

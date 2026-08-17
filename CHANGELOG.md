@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+**measure-ctx.sh sizes against free VRAM, not the sticker on the card.** It
+budgeted against the card's total capacity, which is the right number only on
+an idle box - and in a council it routinely is not, because each model stays
+resident for its keep-alive after its turn. So the measurement promised a
+window that had room, the third model to load found several GB already gone,
+and a `num_ctx` that ran fully on the GPU in testing quietly spilled to system
+RAM in use: same setting, a fraction of the speed, and nothing on screen
+saying so. It now reads what is actually free, names whatever else is holding
+the card so a small budget explains itself, and refuses rather than guessing
+when there is under a gigabyte left. The model being measured is unloaded
+first, so its own footprint never counts against its own budget. Sizing for an
+idle card is still available as `--assume-empty`, and the report always states
+which basis it used rather than implying it measured a number that was
+supplied or assumed. Also fixes the AMD path, which read the VRAM columns by
+position and could land on "used" where it meant "total" - it now finds them
+by header name, since the order has moved between rocm-smi versions.
+
 **One slow model no longer costs you the whole council.** Cancel was the only
 way out of a member that was crawling, and it ends the run - so abandoning the
 third of five seats threw away the two answers already collected, recoverable
