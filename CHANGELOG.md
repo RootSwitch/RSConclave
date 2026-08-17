@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+**Model pickers show what a model actually is.** /api/show carries the whole
+`ollama show` output - the CLI has no privileged access, it is a client of the
+same endpoint - and all of it but two context numbers was being read and
+discarded. Quantization now rides in the option text (`- 256k ctx Q4_K_M`),
+and hovering any model gives the rest: parameter size, whether num_ctx is set
+in the Modelfile or defaulted, the trained maximum, capabilities, and any
+Modelfile parameters. It answers the question that sends you to a terminal -
+"is this model set up sensibly, and is it quantized hard enough to explain
+that?" - without leaving the picker. An unset temperature stays absent rather
+than being reported as zero, because Ollama omits it and its own default
+applies.
+
 **A re-baked model shows its new context without a server restart.** The
 context info from /api/show was cached forever, so after measure-ctx.sh
 --apply changed a model's num_ctx on the box, the app kept showing the

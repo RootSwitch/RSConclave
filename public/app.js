@@ -143,7 +143,35 @@ function ctxLabel(info) {
   if (!info || (info.contextLength === null && info.numCtx === null)) return '';
   const window = info.numCtx ?? 4096;
   const dflt = info.numCtx === null ? '(default) ' : '';
-  return `ctx ${fmtK(window)} ${dflt}/ ${fmtK(info.contextLength)} max`;
+  const build = [info.parameterSize, info.quantization].filter(Boolean).join(' ');
+  return `ctx ${fmtK(window)} ${dflt}/ ${fmtK(info.contextLength)} max${build ? ` - ${build}` : ''}`;
+}
+
+/*
+ * Everything /api/show knows, for a hover. The picker can only carry a few
+ * characters, but the answer to "why is this model behaving like that" is
+ * usually one of these lines: a quantization low enough to explain lost
+ * threads, a `thinking` capability that explains a turn spending its budget
+ * invisibly, or a Modelfile parameter someone set months ago.
+ *
+ * Absent values are omitted rather than guessed - notably temperature, which
+ * Ollama does not report unless a Modelfile sets it, so blank means "the
+ * server default applies", never zero.
+ */
+function modelDetailText(endpointId, model, info) {
+  if (!info) return model;
+  const out = [model];
+  const build = [info.parameterSize, info.quantization].filter(Boolean).join(' ');
+  if (build) out.push(build);
+  if (info.numCtx !== null) out.push(`num_ctx ${info.numCtx.toLocaleString()} (set in the Modelfile)`);
+  else out.push('num_ctx not set - the server default applies, usually 4096');
+  if (info.contextLength) out.push(`trained for ${info.contextLength.toLocaleString()} tokens`);
+  if (info.capabilities?.length) out.push(`capabilities: ${info.capabilities.join(', ')}`);
+  const others = Object.entries(info.params ?? {}).filter(([k]) => k !== 'num_ctx');
+  if (others.length) {
+    out.push('Modelfile parameters:\n' + others.map(([k, v]) => `  ${k} ${v}`).join('\n'));
+  }
+  return out.join('\n');
 }
 
 /** The endpoint record behind an id, or undefined once it has been deleted. */
@@ -240,14 +268,19 @@ function displayModels(endpointId, models) {
 function modelOption(endpointId, m) {
   return el('option', {
     value: m.id,
-    title: m.label === m.id ? null : m.id,
+    // The detail text opens with the real id, so it also covers what the old
+    // alias-only tooltip was for: seeing what a renamed model really is.
+    title: modelDetailText(endpointId, m.id, App.modelInfo(endpointId, m.id)),
   }, m.label + ctxSuffix(App.modelInfo(endpointId, m.id)));
 }
 
 /** Short select-option suffix: " - 4k ctx" (marks server-default windows with *) */
 function ctxSuffix(info) {
   if (!info || (info.contextLength === null && info.numCtx === null)) return '';
-  return ` - ${fmtK(info.numCtx ?? 4096)}${info.numCtx === null ? '*' : ''} ctx`;
+  // Quantization earns its place in the option text: it is the single field
+  // most likely to explain a model that reads as dumber than its size.
+  const q = info.quantization ? ` ${info.quantization}` : '';
+  return ` - ${fmtK(info.numCtx ?? 4096)}${info.numCtx === null ? '*' : ''} ctx${q}`;
 }
 
 /** Span that shows a model's context info; fills in when /api/show data lands. */

@@ -30,9 +30,30 @@ export async function discoverModels(endpoint: Endpoint): Promise<string[]> {
   }
 }
 
+/*
+ * What /api/show tells us about a model. `ollama show` has no privileged local
+ * access - the CLI is a client of this same endpoint - so everything it prints
+ * is available here, and until now all of it but the two context numbers was
+ * read and thrown away.
+ *
+ * The rest is worth keeping because it explains behaviour: a heavily quantized
+ * model that loses the thread mid-answer, a `thinking` capability that accounts
+ * for a turn spending most of its budget invisibly, a Modelfile temperature
+ * someone set months ago and forgot.
+ */
 export interface ModelInfo {
   contextLength: number | null; // trained maximum
   numCtx: number | null; // Modelfile-configured window (null = Ollama server default, usually 4096)
+  quantization: string | null;  // "Q4_K_M"
+  parameterSize: string | null; // "33.4B"
+  capabilities: string[];       // completion, tools, vision, thinking
+  /*
+   * Parameters the MODELFILE sets, not the effective values. An unset
+   * temperature is absent here and Ollama's own default applies - so "no
+   * temperature" means default, never zero. Reporting a guess would be worse
+   * than reporting nothing.
+   */
+  params: Record<string, string>;
 }
 
 /**
@@ -47,11 +68,32 @@ export function parseModelInfo(data: any): ModelInfo {
       break;
     }
   }
-  let numCtx: number | null = null;
-  const params: string = typeof data?.parameters === 'string' ? data.parameters : '';
-  const m = params.match(/(?:^|\n)\s*num_ctx\s+(\d+)/);
-  if (m) numCtx = parseInt(m[1], 10);
-  return { contextLength, numCtx };
+  /*
+   * The parameters block is column-padded text, not JSON:
+   *     num_ctx                        262144
+   *     stop                           "<|im_end|>"
+   * One key per line, value is the rest. A key can repeat (stop, notably), so
+   * later values join rather than overwrite - dropping all but the last stop
+   * sequence would misrepresent the model.
+   */
+  const paramText: string = typeof data?.parameters === 'string' ? data.parameters : '';
+  const params: Record<string, string> = {};
+  for (const line of paramText.split('\n')) {
+    const m = line.match(/^\s*(\S+)\s+(.*?)\s*$/);
+    if (!m) continue;
+    params[m[1]] = params[m[1]] ? `${params[m[1]]} ${m[2]}` : m[2];
+  }
+  const numCtx = /^\d+$/.test(params.num_ctx ?? '') ? parseInt(params.num_ctx, 10) : null;
+
+  const det = data?.details ?? {};
+  return {
+    contextLength,
+    numCtx,
+    quantization: typeof det.quantization_level === 'string' ? det.quantization_level : null,
+    parameterSize: typeof det.parameter_size === 'string' ? det.parameter_size : null,
+    capabilities: Array.isArray(data?.capabilities) ? data.capabilities.map(String) : [],
+    params,
+  };
 }
 
 /*

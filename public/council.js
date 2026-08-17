@@ -264,7 +264,9 @@ const Council = {
         modelListEl.append(row.rowEl);
         consolidatorSel.append(el('option', {
           value: `${ep.id}|${m.id}`,
-          title: m.label === m.id ? null : m.id,
+          // Same detail hover as every other model picker - the consolidator
+          // is the seat most worth checking, since it reads the whole run.
+          title: modelDetailText(ep.id, m.id, App.modelInfo(ep.id, m.id)),
         }, `${m.label} (${ep.name})${ctxSuffix(App.modelInfo(ep.id, m.id))}`));
       }
     }
