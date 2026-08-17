@@ -307,6 +307,7 @@ async function streamOllama(args: StreamChatArgs): Promise<StreamResult> {
     args.onDelta(delta);
   };
   const norm = makeThinkNormalizer(push);
+  let sawDone = false;
   try {
     for await (const line of readLines(res.body!, args.signal)) {
       if (!line.trim()) continue;
@@ -315,6 +316,7 @@ async function streamOllama(args: StreamChatArgs): Promise<StreamResult> {
       norm.thinking(obj.message?.thinking ?? '');
       norm.content(obj.message?.content ?? '');
       if (obj.done) {
+        sawDone = true;
         evalCount = obj.eval_count;
         // 'length' means it stopped because num_predict ran out, not because it
         // had finished - which is the difference the Continue button needs.
@@ -335,6 +337,18 @@ async function streamOllama(args: StreamChatArgs): Promise<StreamResult> {
   }
   norm.finish();
   if (args.signal.aborted) aborted = true;
+  /*
+   * The stream ended without Ollama ever saying it was done.
+   *
+   * Every ordinary ending - finished, hit num_predict, hit a stop sequence -
+   * arrives as a final frame carrying done_reason and eval_count. Reaching
+   * here without one means the connection closed mid-generation: the runner
+   * died, was OOM-killed, or the box went away. The text produced so far is
+   * real and worth keeping, but presenting it as a completed answer is a lie,
+   * and it is exactly what "the model just stopped mid-sentence" looks like
+   * from the outside - no error, no marker, no token count.
+   */
+  if (!sawDone && !aborted) doneReason = 'incomplete';
   return { text, stats: { evalCount, durationMs: Date.now() - started }, aborted, doneReason };
 }
 
@@ -364,15 +378,19 @@ async function streamOpenAi(args: StreamChatArgs): Promise<StreamResult> {
     args.onDelta(delta);
   };
   const norm = makeThinkNormalizer(push);
+  let sawDone = false;
   try {
     for await (const line of readLines(res.body!, args.signal)) {
       if (!line.startsWith('data:')) continue;
       const payload = line.slice(5).trim();
-      if (payload === '[DONE]') break;
+      if (payload === '[DONE]') { sawDone = true; break; }
       if (!payload) continue;
       const obj = JSON.parse(payload);
       if (obj.error) throw new Error(String(obj.error?.message ?? obj.error));
       const finish = obj.choices?.[0]?.finish_reason;
+      // A finish_reason is the server declaring the turn over; not every
+      // implementation bothers to follow it with [DONE].
+      if (finish) sawDone = true;
       if (finish === 'length') openAiTruncated = true;
       const d = obj.choices?.[0]?.delta ?? {};
       // reasoning_content is the DeepSeek-style field; some servers say reasoning
@@ -388,9 +406,11 @@ async function streamOpenAi(args: StreamChatArgs): Promise<StreamResult> {
   }
   norm.finish();
   if (args.signal.aborted) aborted = true;
+  // See streamOllama: a stream that stops without the server ever declaring
+  // the turn finished is a dropped connection, not an answer.
   return {
     text, stats: { durationMs: Date.now() - started }, aborted,
-    doneReason: openAiTruncated ? 'length' : undefined,
+    doneReason: openAiTruncated ? 'length' : (!sawDone && !aborted ? 'incomplete' : undefined),
   };
 }
 

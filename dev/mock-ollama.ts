@@ -4,7 +4,7 @@
 import http from 'node:http';
 
 const PORT = Number(process.env.MOCK_PORT ?? 11435);
-const MODELS = ['mock-sage:30b', 'mock-scribe:13b', 'mock-jester:7b'];
+const MODELS = ['mock-sage:30b', 'mock-scribe:13b', 'mock-jester:7b', 'mock-cutoff:7b'];
 
 const LOREM =
   `As {model}, I have considered the question carefully. The core issue splits into three parts. ` +
@@ -75,6 +75,17 @@ const server = http.createServer(async (req, res) => {
       if (aborted) return;
       res.write(JSON.stringify({ model, message: { role: 'assistant', content: w + ' ' }, done: false }) + '\n');
       count++;
+      /*
+       * The runner dying mid-generation: real tokens, then the connection
+       * closes with NO done frame. Observed in the wild as "the model just
+       * stopped mid-sentence" - an OOM-killed runner on a card that could
+       * not hold the model at that context. The client must not read this
+       * as a finished answer.
+       */
+      // res.end(), not destroy(): a CLEAN close with no done frame, which is
+      // what the client cannot tell from a finished answer. A destroyed socket
+      // makes fetch throw and already surfaces as an error.
+      if (model.startsWith('mock-cutoff') && count > 6) return res.end();
       await sleep(33);
     }
     res.write(JSON.stringify({ model, message: { role: 'assistant', content: '' }, done: true, eval_count: count, total_duration: count * 33e6 }) + '\n');

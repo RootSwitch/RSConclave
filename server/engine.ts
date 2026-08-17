@@ -379,11 +379,25 @@ async function runTurn(a: Active, opts: {
     entry.stats = result.stats;
     // Recomputed rather than OR-ed: a continuation that finishes properly must
     // clear the flag, or the Continue button never goes away.
-    entry.truncated = result.doneReason === 'length' || undefined;
+    /*
+     * Continue is offered for both endings that leave an answer unfinished:
+     * hitting the token cap ('length'), and the stream dying before the
+     * provider ever said it was done ('incomplete').
+     */
+    entry.truncated = result.doneReason === 'length' || result.doneReason === 'incomplete' || undefined;
     // Assigned rather than only set-on-abort: continuing a CANCELLED entry has
     // to be able to clear the marker, or a finished reply would keep claiming it
     // was cut short and stay excluded from context for the rest of the session.
-    entry.error = result.aborted ? 'cancelled' : undefined;
+    /*
+     * 'incomplete' is marked the same way a cancelled turn is: the text is
+     * real and kept, but it is not a finished thought, so it stays out of
+     * later context until Continue completes it. Without this the entry was
+     * indistinguishable from a finished answer - no error, no marker, and a
+     * missing token count as the only clue.
+     */
+    entry.error = result.aborted ? 'cancelled'
+      : result.doneReason === 'incomplete' ? 'the stream ended before the model finished'
+      : undefined;
   } catch (err: any) {
     if (a.abort?.signal.aborted) {
       entry.error = 'cancelled';

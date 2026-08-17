@@ -41,7 +41,11 @@ export function isFinishedTurn(e: TranscriptEntry): boolean {
 
 /** Speaker-label suffix marking a turn that was cut short; '' for a clean one. */
 export function incompleteNote(e: TranscriptEntry): string {
-  return e.error === 'cancelled' ? ' (INCOMPLETE - CANCELLED PART-WAY)' : '';
+  if (e.error === 'cancelled') return ' (INCOMPLETE - CANCELLED PART-WAY)';
+  // A dropped stream leaves a turn just as unfinished as a cancelled one, and
+  // a consolidator reading it deserves to know it is judging half an answer.
+  if (e.error && e.truncated) return ' (INCOMPLETE - CUT OFF PART-WAY)';
+  return '';
 }
 
 /** Render a roundtable transcript as plain labeled text for judging/consolidation. */

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+**A stream that dies mid-answer says so.** Every ordinary ending - finished,
+hit the token cap, hit a stop sequence - arrives as a final frame from the
+provider. A connection that closes mid-generation instead (an OOM-killed
+runner, a box that went away) produced an entry that looked finished: real
+text, no error, no marker, and a missing token count as the only clue. That is
+exactly what "the model just stopped mid-sentence" looks like from the
+outside. Such a turn is now marked like a cancelled one - text kept, flagged
+incomplete, Continue offered, and labelled for any consolidator reading the
+transcript. Distinct from an abruptly destroyed socket, which already
+surfaced as an error.
+
 **Model pickers show what a model actually is.** /api/show carries the whole
 `ollama show` output - the CLI has no privileged access, it is a client of the
 same endpoint - and all of it but two context numbers was being read and
