@@ -463,10 +463,20 @@ const Roundtable = {
         // wrong turn is worth branching rather than rerolling away.
         if (complete && e.text) statsRow.push(forkButton(session.id, e.id));
 
+        /*
+         * A seat that stopped short is marked here for the same reason a
+         * council member is: the judge is told, via the speaker label in the
+         * rendered transcript, and until now the person reading the
+         * conversation was not. It matters more in a roundtable than
+         * anywhere - a half-finished turn is what the NEXT seat answers.
+         */
+        const unfinished = unfinishedReason(e);
+
         const bubble = el('div', { class: cls },
           el('div', { class: 'speaker' },
             consolidation ? `Judge - ${e.speaker}` : e.speaker,
             e.model && e.speaker !== e.model ? el('span', { class: 'model-tag' }, `  ${e.model}`) : null,
+            unfinished ? el('span', { class: 'sev warn', title: unfinished.title }, unfinished.label) : null,
           ),
           textEl,
           e.kind === 'error' ? el('div', { class: 'error-text' }, e.error ?? 'error') : null,

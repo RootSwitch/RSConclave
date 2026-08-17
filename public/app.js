@@ -302,27 +302,25 @@ function fillCtxTags() {
 document.addEventListener('model-info-loaded', fillCtxTags);
 
 /**
- * Status for a card entry as a pill (shape + colour, per the suite's rule that
- * state must survive a colour-blind reader), plus monospace stats when done.
+ * Why a turn is not a finished answer, or null when it is.
+ *
+ * One wording for every view. A council renders this as a pill in the card
+ * header and a roundtable as a tag on the speaker line, and the two saying
+ * different things about the same entry is how a reader learns to distrust
+ * both.
  */
-function entryStatus(entry, complete) {
-  if (entry.kind === 'error') {
-    return [el('span', { class: 'sev crit', title: entry.error || 'error' }, 'error')];
-  }
+function unfinishedReason(entry) {
+  // Says what "kept" means. The old label was just "partial output kept",
+  // which read as "kept, so it still counts" - and in half the modes it did
+  // and in half it did not. It is kept to read, copy and continue; it is not
+  // handed to later turns as though it were a finished answer.
   if (entry.error === 'cancelled') {
-    // Says what "kept" means. The old label was just "partial output kept",
-    // which read as "kept, so it still counts" - and in half the modes it did
-    // and in half it did not. It is kept to read, copy and continue; it is not
-    // handed to later turns as though it were a finished answer.
-    return [el('span', { class: 'sev warn',
+    return {
+      label: 'cancelled',
       title: 'Stopped part-way. The partial text is kept here to read, copy or continue, but it is not sent as context to later turns.',
-    }, 'cancelled')];
-  }
-  if (!complete) {
-    // An open <think> with no close yet means the model is still reasoning -
-    // say so instead of the generic "streaming", which reads as the answer.
-    const reasoning = entry.text.includes('<think>') && !entry.text.includes('</think>');
-    return [el('span', { class: 'badge busy' }, reasoning ? 'reasoning' : 'streaming')];
+      // The user pressed the button; how far it got is not the question.
+      withStats: false,
+    };
   }
   /*
    * A turn that stopped short is not a finished one, however ordinary the text
@@ -330,22 +328,45 @@ function entryStatus(entry, complete) {
    * a model that hit its output cap or died mid-stream was indistinguishable
    * on screen from one that finished - the transcript said the consolidator
    * had been told, and the reader had not.
-   *
-   * Cancelled is handled above and keeps its own wording, because the user
-   * already knows why that one stopped.
    */
   if (entry.truncated) {
-    const out = [el('span', { class: 'sev warn',
+    return {
+      label: 'incomplete',
       // The error text when there is one names the ending: a dropped stream
       // reads differently from a budget that ran out, and the difference is
       // the whole diagnosis.
       title: `${entry.error ?? 'Stopped at its output limit'}. The partial text is kept here to read and copy, but it is not sent as context to later turns.`,
-    }, 'incomplete')];
-    // Stats stay: how far it got before stopping is the first thing you want
-    // to know, and it is what a raised max out has to be measured against.
-    const st = statsLine(entry.stats);
+      // How far it got is the first thing you want to know, and it is what a
+      // raised max out has to be measured against.
+      withStats: true,
+    };
+  }
+  return null;
+}
+
+/**
+ * Status for a card entry as a pill (shape + colour, per the suite's rule that
+ * state must survive a colour-blind reader), plus monospace stats when done.
+ */
+function entryStatus(entry, complete) {
+  if (entry.kind === 'error') {
+    return [el('span', { class: 'sev crit', title: entry.error || 'error' }, 'error')];
+  }
+  // Ahead of the streaming check on purpose: a cancelled turn must read as
+  // cancelled rather than as still running. Truncation is only ever set once
+  // the stream has ended, so it is unaffected by the order.
+  const unfinished = unfinishedReason(entry);
+  if (unfinished) {
+    const out = [el('span', { class: 'sev warn', title: unfinished.title }, unfinished.label)];
+    const st = unfinished.withStats ? statsLine(entry.stats) : null;
     if (st) out.push(el('span', { class: 'stats' }, st));
     return out;
+  }
+  if (!complete) {
+    // An open <think> with no close yet means the model is still reasoning -
+    // say so instead of the generic "streaming", which reads as the answer.
+    const reasoning = entry.text.includes('<think>') && !entry.text.includes('</think>');
+    return [el('span', { class: 'badge busy' }, reasoning ? 'reasoning' : 'streaming')];
   }
   const out = [el('span', { class: 'badge ok' }, 'done')];
   const s = statsLine(entry.stats);

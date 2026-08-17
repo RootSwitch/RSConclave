@@ -10,8 +10,9 @@ the only way to find out a model had stopped early was to count tokens or go
 digging in the server's logs. Those turns now show an amber **incomplete** pill
 with the token count beside it, and hovering says which ending it was - a
 dropped stream reads differently from a budget that ran out, and the difference
-is the whole diagnosis. Councils and pipelines; chat already offered Continue,
-which said the same thing.
+is the whole diagnosis. Councils, pipelines and roundtables; chat already offered
+Continue, which said the same thing. It matters most in a roundtable, where
+a half-finished turn is what the NEXT seat answers.
 
 **A model that hit its output cap was described to the consolidator as
 finished.** The label needed both an error and a truncation flag, and hitting

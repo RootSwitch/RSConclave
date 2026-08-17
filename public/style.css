@@ -461,6 +461,9 @@ details[open] summary { margin-bottom: 9px; }
     max-width: 900px;
 }
 .bubble .speaker { font-weight: 600; font-size: 12px; margin-bottom: 5px; }
+/* The unfinished tag rides on the speaker line, which is bold 12px - the pill
+   sets its own weight and size, and only needs separating from the name. */
+.bubble .speaker .sev { margin-left: 8px; vertical-align: baseline; }
 .bubble .speaker .model-tag {
     font-family: ui-monospace, Consolas, monospace;
     color: var(--se-txt-dim);
