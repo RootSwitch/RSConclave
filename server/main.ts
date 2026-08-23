@@ -440,9 +440,13 @@ route('DELETE', '/api/sessions/:id', (req, res, params) => {
   sendJson(res, 200, { ok: true });
 });
 route('GET', '/api/sessions/:id/export.md', (req, res, params) => {
-  const s = store.loadSession<Session>(userOf(req), params.id);
+  const me = userOf(req);
+  const s = store.loadSession<Session>(me, params.id);
   if (!s) throw new HttpError(404, 'session not found');
-  const md = sessionToMarkdown(s);
+  // Personas ride along so a chat export can carry its full system prompt,
+  // memory layer included - the transcript alone shows a model that knows
+  // things with no trace of how it knew them.
+  const md = sessionToMarkdown(s, store.loadUser<Persona[]>(me, 'personas', DEFAULT_PERSONAS));
   res.writeHead(200, {
     'content-type': 'text/markdown; charset=utf-8',
     'content-disposition': `attachment; filename="${s.id}.md"`,

@@ -23,6 +23,24 @@ consolidation can become a memory: a council's synthesis or a roundtable
 verdict as readily as a chat summary. Deliberately a dated list and not a
 database - small enough to read, and reading it is the point.
 
+Refined after first real use: saving spells out its two outcomes as verbs,
+**Append** or **Erase & replace**, because a checkbox called "replace
+existing" read as ambiguous between them and the wrong guess is destructive.
+The bottom bar gains a **Summarise ↑** button that opens the panel at the top,
+so a long conversation does not mean scrolling all the way up to distil it.
+The markdown export now carries the full system prompt - persona, memory and
+session layers - marked as rendered at export time, since memories evolve;
+before, a transcript showed a model that plainly knew things with no trace of
+how it knew them. And the summariser's default template now says a remembered
+fact the assistant echoed back is not new, after a real second-session summary
+re-recorded the first memory's open threads by way of the model repeating
+them.
+
+**Saving personas answers at the button.** Save popped an alert and then left
+the page looking exactly as it had before - which, right after creating a
+persona, reads as "did that take?". The button itself now flips to "Saved ✓"
+for a moment instead.
+
 **A turn that stopped short says so on screen, not just to the consolidator.**
 A council member that hit its output cap or died mid-stream took the same green
 "done" pill as one that answered in full. The transcript handed to the

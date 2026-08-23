@@ -434,9 +434,11 @@ function judgeSection({ summary, modelLabel, templateLabel, template, runLabel, 
 /**
  * "Remember" on a consolidation entry, in any mode. Opens inline to a persona
  * picker rather than saving on the click, because which persona should carry
- * the memory IS the decision, and a default would make it for you. Replace
- * is offered everywhere and defaults on only in a compaction session, where
- * replacing the list is the point.
+ * the memory IS the decision, and a default would make it for you. The two
+ * outcomes are spelled as verbs - Append, or Erase & replace - because a
+ * checkbox called "replace existing" read as ambiguous between them, and the
+ * wrong guess is destructive. A compaction session still preselects the
+ * persona being compacted; the verbs stay the same.
  */
 function saveMemoryButton(session, entry) {
   const wrap = el('span', { class: 'row', style: 'gap: 6px' });
@@ -446,11 +448,9 @@ function saveMemoryButton(session, entry) {
     const personaSel = el('select', {}, ...App.personas.map((p) =>
       el('option', { value: p.id }, `${p.name}${p.memories?.length ? ` (${p.memories.length})` : ''}`)));
     if (compacting && App.personas.some((p) => p.id === compacting)) personaSel.value = compacting;
-    const replace = el('input', { type: 'checkbox' });
-    replace.checked = Boolean(compacting);
-    const save = async () => {
+    const save = async (replaceAll) => {
       try {
-        const persona = await Api.saveMemory(personaSel.value, session.id, entry.id, replace.checked);
+        const persona = await Api.saveMemory(personaSel.value, session.id, entry.id, replaceAll);
         const i = App.personas.findIndex((p) => p.id === persona.id);
         if (i >= 0) App.personas[i] = persona; else App.personas.push(persona);
         const n = persona.memories?.length ?? 0;
@@ -461,8 +461,8 @@ function saveMemoryButton(session, entry) {
     };
     wrap.replaceChildren(
       personaSel,
-      el('label', { class: 'muted', title: 'Forget everything this persona remembers and keep only this.' }, replace, ' replace existing'),
-      el('button', { class: 'mini primary', onclick: save }, 'Save'),
+      el('button', { class: 'mini primary', title: 'Add this to what the persona already remembers.', onclick: () => save(false) }, 'Append'),
+      el('button', { class: 'mini danger', title: 'Forget everything this persona already remembers and keep only this.', onclick: () => save(true) }, 'Erase & replace'),
       el('button', { class: 'mini', onclick: () => wrap.replaceChildren(btn) }, 'Cancel'),
     );
   };

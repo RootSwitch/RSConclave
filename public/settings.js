@@ -261,7 +261,7 @@ const Settings = {
       };
       // Name is single-line so Enter saves; the prompt beneath it is
       // long-form, where Enter must stay a newline.
-      onEnterSubmit([els.name], () => save().then(() => alert('saved')).catch((e) => alert(e.message)));
+      onEnterSubmit([els.name], () => save().catch((e) => alert(e.message)));
       const id = p?.id ?? 'ps' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
       /*
@@ -349,6 +349,13 @@ const Settings = {
       rows.push(rowObj);
     };
 
+    /*
+     * The confirmation is the button itself. An alert said "saved" and then
+     * left the page looking exactly as it did before - which, right after
+     * creating a persona, reads as "did that take?". A state change where
+     * the click happened answers the question the alert only restated.
+     */
+    const saveBtn = el('button', { class: 'primary' }, 'Save');
     const save = async () => {
       // Memories are sent as this page knows them - edited text, minus the
       // forgotten ones. Sending the key at all is what lets a deletion stick;
@@ -363,7 +370,10 @@ const Settings = {
         }));
       await Api.putPersonas(personas);
       App.personas = personas;
+      saveBtn.textContent = 'Saved ✓';
+      setTimeout(() => { saveBtn.textContent = 'Save'; }, 1600);
     };
+    saveBtn.onclick = () => save().catch((e) => alert(e.message));
 
     for (const p of App.personas) addRow(p);
 
@@ -372,7 +382,7 @@ const Settings = {
         el('label', {}, 'Personas (reusable base system prompts)'),
         el('span', { class: 'grow' }),
         el('button', { onclick: () => addRow() }, '+ add persona'),
-        el('button', { class: 'primary', onclick: () => save().then(() => alert('saved')).catch((e) => alert(e.message)) }, 'Save'),
+        saveBtn,
       ),
       rowsWrap,
     );

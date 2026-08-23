@@ -85,3 +85,34 @@ test('export: header carries mode, status and tags', () => {
   assert.match(md, /- Status: done/);
   assert.match(md, /- Tags: keep, later/);
 });
+
+test('export: a chat with a persona carries the full system prompt, memory included', () => {
+  // The transcript alone showed a model that plainly knew things with no
+  // trace of how it knew them - the persona and memory layers never reached
+  // the export, only the free-text field did.
+  const s = chatSession([entry({ kind: 'user', speaker: 'You', text: 'hi' })]);
+  const config = s.config as { personaId?: string; systemPrompt?: string };
+  config.personaId = 'p1';
+  config.systemPrompt = 'Session-only instructions.';
+  const personas = [{
+    id: 'p1', name: 'Archivist', systemPrompt: 'You keep records.',
+    memories: [{ id: 'm', at: '2026-08-20T00:00:00Z', text: 'The user prefers terse answers.' }],
+  }];
+  const md = sessionToMarkdown(s, personas);
+  assert.ok(md.includes('## System prompt'));
+  assert.ok(md.includes('You keep records.'));
+  assert.ok(md.includes('[2026-08-20] The user prefers terse answers.'));
+  assert.ok(md.includes('Session-only instructions.'));
+  // Honest about what the section is: the prompt as it renders NOW, which for
+  // an evolving memory is not necessarily what every earlier turn was sent.
+  assert.match(md, /memories evolve/);
+});
+
+test('export: without a persona the system prompt section is unchanged', () => {
+  const s = chatSession([entry({ text: 'hi' })]);
+  (s.config as { systemPrompt?: string }).systemPrompt = 'Only this.';
+  const md = sessionToMarkdown(s);
+  assert.ok(md.includes('## System prompt'));
+  assert.ok(md.includes('Only this.'));
+  assert.ok(!md.includes('memories evolve'), 'no caveat when nothing evolves');
+});

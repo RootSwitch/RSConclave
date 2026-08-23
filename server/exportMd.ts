@@ -1,6 +1,7 @@
 // Session → readable markdown.
-import type { ChatConfig, CouncilConfig, PipelineConfig, RoundtableConfig, Session } from './types.ts';
+import type { ChatConfig, CouncilConfig, Persona, PipelineConfig, RoundtableConfig, Session } from './types.ts';
 import { tallyBallot, tallyToMarkdown } from './vote.ts';
+import { buildSystemPrompt } from './chat.ts';
 
 /*
  * Close a code fence the model left open.
@@ -33,7 +34,7 @@ function splitThinking(text: string): { thinking: string[]; body: string } {
   return { thinking, body };
 }
 
-export function sessionToMarkdown(session: Session): string {
+export function sessionToMarkdown(session: Session, personas: Persona[] = []): string {
   const lines: string[] = [];
   lines.push(`# ${session.title}`);
   lines.push('');
@@ -58,11 +59,24 @@ export function sessionToMarkdown(session: Session): string {
   } else if (session.mode === 'chat') {
     const c = session.config as ChatConfig;
     lines.push(`Model: ${c.model}`);
-    if (c.systemPrompt?.trim()) {
+    /*
+     * The WHOLE prompt - persona, memory and session layers - not just the
+     * free-text field. The gap was found from the other side: a transcript
+     * where the model plainly knew things, exported with no trace of how it
+     * knew them. Rendered at export time and marked as such, because a
+     * persona's memories evolve and earlier turns in this same transcript
+     * may have been sent an earlier version.
+     */
+    const sys = buildSystemPrompt(c, personas);
+    if (sys) {
       lines.push('');
       lines.push('## System prompt');
       lines.push('');
-      lines.push(c.systemPrompt.trim());
+      if (c.personaId) {
+        lines.push('*(as rendered at export time - memories evolve, so earlier turns may have been sent an earlier version)*');
+        lines.push('');
+      }
+      lines.push(sys);
     }
   } else if (session.mode === 'pipeline') {
     const c = session.config as PipelineConfig;

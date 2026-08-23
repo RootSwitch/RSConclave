@@ -348,7 +348,7 @@ What the persona already remembers from earlier conversations:
 The conversation:
 {{TRANSCRIPT}}
 
-Write the memory as short plain prose or bullets, referring to the other party as "the user". Record only what is NEW: decisions made, preferences stated, facts about the user or their projects, and threads left open. Do not repeat anything already remembered. Leave out pleasantries and anything a model would know without this conversation. If the conversation added nothing worth keeping, say so in one line.`;
+Write the memory as short plain prose or bullets, referring to the other party as "the user". Record only what is NEW: decisions made, preferences stated, facts about the user or their projects, and threads left open. Do not repeat anything already remembered, even where the conversation itself echoed it back - a remembered fact restated by the assistant is not new. Leave out pleasantries and anything a model would know without this conversation. If the conversation added nothing worth keeping, say so in one line.`;
 
 /*
  * Many memories -> one. Lossy by nature, which is why it is a button and not

@@ -36,7 +36,9 @@ const Chat = {
         !App.isActiveSession() ? resumeButton(session.id) : null,
       ),
       this.buildBrief(session),
-      this.buildSummarizeSection(session),
+      // Kept on `this` so the bottom bar's Summarise button can open it; on a
+      // long conversation the fold lives a lot of scrollback away.
+      (this.summarizeFold = this.buildSummarizeSection(session)),
     );
     this.transcriptEl = el('div', { id: 'transcript' });
     this.composeBar = el('div', { id: 'gate-bar' });
@@ -287,10 +289,27 @@ const Chat = {
     const st = App.runState;
     this.composeBar.replaceChildren();
 
+    /*
+     * The jump to the summarise fold rides in BOTH bar states. A finished
+     * conversation is not the active session, and that is exactly the one
+     * most worth distilling into a memory - requiring a Resume first would
+     * be a hoop, since running the summariser resumes the session anyway.
+     */
+    const summarizeJump = () => session.entries.some((e) => e.kind !== 'user')
+      ? el('button', {
+          title: 'Open the summarise panel at the top of the conversation.',
+          onclick: () => {
+            if (this.summarizeFold) this.summarizeFold.open = true;
+            this.scrollEl.scrollTop = 0;
+          },
+        }, session.config.compactsPersonaId ? 'Compact ↑' : 'Summarise ↑')
+      : null;
+
     if (!App.isActiveSession()) {
       this.composeBar.append(el('div', { class: 'row' },
         el('span', { class: 'muted' }, 'not the active session'),
-        resumeButton(session.id)));
+        resumeButton(session.id),
+        summarizeJump()));
       return;
     }
 
@@ -345,6 +364,7 @@ const Chat = {
           : hasReply && !lastIsSummary
             ? el('button', { onclick: () => once('chat-regen', () => Api.chatRegenerate()).catch((e) => alert(e.message)) }, 'Regenerate')
             : null,
+        summarizeJump(),
         el('span', { class: 'grow' }),
         el('button', { class: 'danger', onclick: () => {
           if (confirm('End this chat?')) Api.stopRun().catch((e) => alert(e.message));
