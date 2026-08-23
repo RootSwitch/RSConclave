@@ -8,6 +8,7 @@ import type {
 } from './types.ts';
 import { estimateMessages } from './tokens.ts';
 import { isFinishedTurn, stripThink } from './text.ts';
+import { renderMemoryLayer } from './memory.ts';
 
 /** Round-robin: next participant after the one who spoke last (or the first). */
 export function nextSpeaker(config: RoundtableConfig, entries: TranscriptEntry[]): Participant {
@@ -39,6 +40,13 @@ export function buildSystemPrompt(
   );
   const persona = p.personaId ? personas.find((x) => x.id === p.personaId) : undefined;
   if (persona?.systemPrompt.trim()) layers.push(persona.systemPrompt.trim());
+  // A persona's memory is the persona's, not the chat view's: a Skeptic that
+  // remembers last week's argument remembers it at the table too. Same
+  // position as in chat - after who it is, before this session's overlay.
+  if (persona) {
+    const memory = renderMemoryLayer(persona);
+    if (memory) layers.push(memory);
+  }
   if (p.overlayPrompt?.trim()) layers.push(p.overlayPrompt.trim());
   if (config.scenario.trim()) layers.push(`SCENARIO:\n${config.scenario.trim()}`);
   return layers.join('\n\n');

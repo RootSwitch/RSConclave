@@ -510,6 +510,9 @@ const Council = {
       actions.push(el('button', { class: 'mini', onclick: () =>
         Api.councilRerunMember(session.id, entry.memberIndex).catch((e) => alert(e.message)) }, 'Re-run'));
     }
+    // The consolidation is the council's one distilled answer - the same
+    // thing a persona memory is made of, so it can become one.
+    if (isConsolidation && complete && entry.text) actions.push(saveMemoryButton(session, entry));
     if (generating && !complete) {
       /*
        * Two ways out of a member that is not going well, and the difference

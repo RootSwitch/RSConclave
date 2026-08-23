@@ -116,43 +116,17 @@ const Roundtable = {
 
   /** Judge/consolidate: run a model over the whole transcript (verdicts, recaps). */
   buildJudgeSection(session) {
-    const endpointSel = el('select', {}, ...App.config.endpoints.map((ep) => el('option', { value: ep.id }, ep.name)));
-    const modelSel = el('select', {});
-    const fillModels = async () => {
-      modelSel.replaceChildren(el('option', {}, 'loading…'));
-      try {
-        const epId = endpointSel.value;
-        const models = await App.loadModels(epId);
-        await App.loadModelInfo(epId).catch(() => {});
-        modelSel.replaceChildren(...displayModels(epId, models).map((m) => modelOption(epId, m)));
-      } catch {
-        modelSel.replaceChildren(el('option', {}, 'error'));
-      }
-    };
-    if (App.config.endpoints.length) fillModels();
-    endpointSel.onchange = fillModels;
-    const templateEl = el('textarea', { rows: 6 }, App.presets.judgeTemplate || '{{TRANSCRIPT}}');
-    const judgeCtxEl = ctxInput();
-    const judgeMaxOutEl = maxTokensInput();
-    ollamaOnly(judgeCtxEl, endpointSel); // filled at construction, no re-sync
-    return el('details', { style: 'margin-bottom: 10px' },
-      el('summary', {}, 'Judge / consolidate this conversation'),
-      el('div', { class: 'col' },
-        el('div', { class: 'row' },
-          el('label', {}, 'Judge model'), endpointSel, modelSel, judgeCtxEl, judgeMaxOutEl,
-          el('span', { class: 'muted', title: 'The judge reads the whole transcript at once - give it a window bigger than the conversation.' }, '⟵ give it room'),
-        ),
-        el('label', {}, 'Template ({{TRANSCRIPT}} = the labeled conversation)'),
-        templateEl,
-        el('div', { class: 'row' },
-          el('button', { class: 'primary', onclick: () => {
-            if (!modelSel.value) return;
-            Api.rtConsolidate(session.id, endpointSel.value, modelSel.value, templateEl.value, genParams(undefined, judgeCtxEl.value, judgeMaxOutEl.value))
-              .catch((e) => alert(e.message));
-          } }, 'Run judge'),
-        ),
-      ),
-    );
+    // The shape lives in judgeSection (app.js) and is shared with the chat's
+    // summariser and the persona memory compactor; only the words are ours.
+    return judgeSection({
+      summary: 'Judge / consolidate this conversation',
+      modelLabel: 'Judge model',
+      roomHint: 'The judge reads the whole transcript at once - give it a window bigger than the conversation.',
+      templateLabel: 'Template ({{TRANSCRIPT}} = the labeled conversation)',
+      template: App.presets.judgeTemplate || '{{TRANSCRIPT}}',
+      runLabel: 'Run judge',
+      onRun: (endpointId, model, template, params) => Api.rtConsolidate(session.id, endpointId, model, template, params),
+    });
   },
 
   /* ---------- setup ---------- */
@@ -462,6 +436,9 @@ const Roundtable = {
         // Forking matters most here: a roundtable that takes an interesting
         // wrong turn is worth branching rather than rerolling away.
         if (complete && e.text) statsRow.push(forkButton(session.id, e.id));
+        // A verdict is a distillation of the conversation, which is exactly
+        // what a persona memory is made of.
+        if (consolidation && complete && e.text) statsRow.push(saveMemoryButton(session, e));
 
         /*
          * A seat that stopped short is marked here for the same reason a

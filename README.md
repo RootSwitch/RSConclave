@@ -47,7 +47,9 @@ and every transcript **exports** as markdown.
 
 - **Chat** - a plain 1:1 conversation with one model, using the same discovery, per-seat
   `num_ctx`, context metering and streaming as everything else. Enter sends, Shift+Enter
-  newlines, Regenerate re-rolls the last reply.
+  newlines, Regenerate re-rolls the last reply. **Summarise** runs a model over the whole
+  conversation, and the summary can be saved to a persona as a **memory** it carries into
+  later conversations - see [Persona memory](#persona-memory).
 - **Council of Elders** - send one prompt to a sequence of models, then a designated
   *consolidator* model reviews all labeled responses and synthesizes a final answer.
   Re-run individual members or just the consolidation (with an edited template) at any time.
@@ -395,7 +397,33 @@ record and export, so renaming never invalidates history.
 
 Personas (reusable base system prompts) are also managed in Settings, and six examples ship
 with a fresh account. In a roundtable, each participant's system prompt is layered: framing
-preamble, then persona, then role overlay, then scenario.
+preamble, then persona, then the persona's memory, then role overlay, then scenario.
+
+### Persona memory
+
+A persona can carry **memories**: short summaries of earlier conversations, written by a model
+and attached by you. Nothing is remembered automatically.
+
+1. In a chat, open **Summarise this conversation** and run it. The summariser is handed the
+   transcript and whatever the persona already remembers, and asked to write only what is new.
+   Its output lands in the chat as a summary you read first.
+2. Press **Remember** on the summary and pick the persona. Any consolidation can be saved this
+   way - a council's synthesis and a roundtable verdict too, not only chat summaries.
+3. Start a new chat, or seat a roundtable participant, with that persona. The memories go in
+   after the persona's own prompt, framed as things it remembers rather than as instructions,
+   and the **System prompt** fold on the session shows exactly what was sent.
+
+Settings lists every memory a persona holds with the date, the model that wrote it and the
+conversation it came from; each is editable and deletable, and the block says roughly how many
+tokens the memories add to every turn. When the list grows past what your smallest model's
+window can carry, **Compact** runs a model over the memories and opens the result as its own
+session - save it with "replace existing" and the list becomes one entry. Summaries of summaries
+lose resolution, which is why compaction is a button you press after reading the result, not a
+policy. The original conversations are untouched throughout; a memory is only ever a copy.
+
+The summariser never sees the persona's prompt or its memory inside the transcript - neither is
+a transcript entry - so it cannot fold the memory back into itself. It is shown the memory only
+as a separate reference, for the "write only what is new" instruction.
 
 ## Data
 

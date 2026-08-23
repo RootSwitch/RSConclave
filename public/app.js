@@ -375,6 +375,107 @@ function entryStatus(entry, complete) {
 }
 
 /**
+ * A fold that runs one model over a whole transcript: the roundtable's judge,
+ * the chat's summariser, a persona's memory compactor. One builder so the
+ * three cannot drift apart in what they offer - endpoint, model, window, cap,
+ * an editable template, a run button - while each says its own words.
+ *
+ * onRun(endpointId, model, template, params) does the work. It is awaited so
+ * a failure lands in an alert rather than nowhere, and the button is held
+ * down meanwhile so a slow server cannot collect two clicks.
+ */
+function judgeSection({ summary, modelLabel, templateLabel, template, runLabel, roomHint, onRun, open = false }) {
+  const endpointSel = el('select', {}, ...App.config.endpoints.map((ep) => el('option', { value: ep.id }, ep.name)));
+  const modelSel = el('select', {});
+  const fillModels = async () => {
+    modelSel.replaceChildren(el('option', {}, 'loading…'));
+    try {
+      const epId = endpointSel.value;
+      const models = await App.loadModels(epId);
+      await App.loadModelInfo(epId).catch(() => {});
+      modelSel.replaceChildren(...displayModels(epId, models).map((m) => modelOption(epId, m)));
+    } catch {
+      modelSel.replaceChildren(el('option', {}, 'error'));
+    }
+  };
+  if (App.config.endpoints.length) fillModels();
+  endpointSel.onchange = fillModels;
+  const templateEl = el('textarea', { rows: 6 }, template);
+  const ctxEl = ctxInput();
+  const maxOutEl = maxTokensInput();
+  ollamaOnly(ctxEl, endpointSel); // filled at construction, no re-sync
+  const runBtn = el('button', { class: 'primary', onclick: async () => {
+    if (!modelSel.value) return;
+    runBtn.disabled = true;
+    try {
+      await onRun(endpointSel.value, modelSel.value, templateEl.value, genParams(undefined, ctxEl.value, maxOutEl.value));
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      runBtn.disabled = false;
+    }
+  } }, runLabel);
+  const details = el('details', { style: 'margin-bottom: 10px' },
+    el('summary', {}, summary),
+    el('div', { class: 'col' },
+      el('div', { class: 'row' },
+        el('label', {}, modelLabel), endpointSel, modelSel, ctxEl, maxOutEl,
+        roomHint ? el('span', { class: 'muted', title: roomHint }, '⟵ give it room') : null,
+      ),
+      el('label', {}, templateLabel),
+      templateEl,
+      el('div', { class: 'row' }, runBtn),
+    ),
+  );
+  if (open) details.open = true;
+  return details;
+}
+
+/**
+ * "Remember" on a consolidation entry, in any mode. Opens inline to a persona
+ * picker rather than saving on the click, because which persona should carry
+ * the memory IS the decision, and a default would make it for you. Replace
+ * is offered everywhere and defaults on only in a compaction session, where
+ * replacing the list is the point.
+ */
+function saveMemoryButton(session, entry) {
+  const wrap = el('span', { class: 'row', style: 'gap: 6px' });
+  const compacting = session.config?.compactsPersonaId;
+  const open = () => {
+    if (!App.personas.length) { alert('No personas yet - add one in Settings first.'); return; }
+    const personaSel = el('select', {}, ...App.personas.map((p) =>
+      el('option', { value: p.id }, `${p.name}${p.memories?.length ? ` (${p.memories.length})` : ''}`)));
+    if (compacting && App.personas.some((p) => p.id === compacting)) personaSel.value = compacting;
+    const replace = el('input', { type: 'checkbox' });
+    replace.checked = Boolean(compacting);
+    const save = async () => {
+      try {
+        const persona = await Api.saveMemory(personaSel.value, session.id, entry.id, replace.checked);
+        const i = App.personas.findIndex((p) => p.id === persona.id);
+        if (i >= 0) App.personas[i] = persona; else App.personas.push(persona);
+        const n = persona.memories?.length ?? 0;
+        wrap.replaceChildren(el('span', { class: 'muted' }, `remembered by ${persona.name} (${n} ${n === 1 ? 'memory' : 'memories'})`));
+      } catch (e) {
+        alert(e.message);
+      }
+    };
+    wrap.replaceChildren(
+      personaSel,
+      el('label', { class: 'muted', title: 'Forget everything this persona remembers and keep only this.' }, replace, ' replace existing'),
+      el('button', { class: 'mini primary', onclick: save }, 'Save'),
+      el('button', { class: 'mini', onclick: () => wrap.replaceChildren(btn) }, 'Cancel'),
+    );
+  };
+  const btn = el('button', {
+    class: 'mini',
+    title: 'Attach this text to a persona as something it remembers in later conversations.',
+    onclick: open,
+  }, 'Remember ▾');
+  wrap.append(btn);
+  return wrap;
+}
+
+/**
  * Append a freshly saved preset to its picker and select it, so saving is
  * visibly confirmed instead of only showing up after a remount.
  */

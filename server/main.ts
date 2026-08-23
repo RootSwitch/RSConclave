@@ -12,11 +12,18 @@ import { clearModelInfoCache, discoverModels, getModelInfo } from './providers.t
 import * as store from './store.ts';
 import * as engine from './engine.ts';
 import * as rt from './roundtable.ts';
+import * as chat from './chat.ts';
 import * as auth from './auth.ts';
 import { sessionToMarkdown } from './exportMd.ts';
 import { searchSessions } from './search.ts';
 import type { AppConfig, Persona, Presets, Session } from './types.ts';
-import { DEFAULT_CONSOLIDATOR_TEMPLATE, DEFAULT_JUDGE_TEMPLATE, DEFAULT_PERSONAS } from './types.ts';
+import {
+  DEFAULT_COMPACT_TEMPLATE,
+  DEFAULT_CONSOLIDATOR_TEMPLATE,
+  DEFAULT_JUDGE_TEMPLATE,
+  DEFAULT_PERSONAS,
+  DEFAULT_SUMMARIZE_TEMPLATE,
+} from './types.ts';
 
 const PORT = Number(process.env.PORT ?? 7777);
 // Localhost by default. Set HOST=0.0.0.0 to reach it from other machines.
@@ -44,6 +51,8 @@ if (fs.existsSync(CERT_PATH) && fs.existsSync(KEY_PATH)) {
 const defaultPresets: Presets = {
   consolidatorTemplate: DEFAULT_CONSOLIDATOR_TEMPLATE,
   judgeTemplate: DEFAULT_JUDGE_TEMPLATE,
+  summarizeTemplate: DEFAULT_SUMMARIZE_TEMPLATE,
+  compactTemplate: DEFAULT_COMPACT_TEMPLATE,
   councils: [],
   roundtables: [],
   pipelines: [],
@@ -224,12 +233,61 @@ route('PUT', '/api/personas', async (req, res) => {
   const me = userOf(req);
   const body = await readJsonBody(req);
   if (!Array.isArray(body)) throw new HttpError(400, 'expected an array of personas');
-  store.saveUser(me, 'personas', body);
+  /*
+   * Memories are the one part of a persona the editor did not type, so a
+   * client that does not know about them must not be able to wipe them by
+   * saving the fields it does know. A persona sent WITHOUT a memories key
+   * keeps the memories it has; one sent with memories: [] is cleared. The
+   * distinction is absent versus empty, and it is the whole contract.
+   */
+  const current = store.loadUser<Persona[]>(me, 'personas', DEFAULT_PERSONAS);
+  const merged = body.map((p: any) => {
+    if (!p || typeof p !== 'object' || typeof p.id !== 'string') throw new HttpError(400, 'each persona needs an id');
+    if (p.memories === undefined) {
+      const was = current.find((c) => c.id === p.id);
+      return was?.memories?.length ? { ...p, memories: was.memories } : p;
+    }
+    if (!Array.isArray(p.memories)) throw new HttpError(400, 'memories must be an array');
+    return p;
+  });
+  store.saveUser(me, 'personas', merged);
   sendJson(res, 200, { ok: true });
+});
+/*
+ * Memory is written by a model and attached by a person, in that order and
+ * never the other way round. The entry named here must be a consolidation -
+ * see engine.saveMemory.
+ */
+route('POST', '/api/personas/:id/memories', async (req, res, params) => {
+  const { sessionId, entryId, replace } = await readJsonBody(req);
+  const persona = engine.saveMemory(
+    userOf(req),
+    params.id,
+    requireText(sessionId, 'sessionId'),
+    requireText(entryId, 'entryId'),
+    Boolean(replace),
+  );
+  sendJson(res, 200, persona);
+});
+// Rewrite the whole memory list as one entry. Returns the session it runs in;
+// the result is reviewed there and saved with replace, or not at all.
+route('POST', '/api/personas/:id/compact', async (req, res, params) => {
+  const { endpointId, model, template, params: gen } = await readJsonBody(req);
+  if (!endpointId || !model) throw new HttpError(400, 'endpointId and model required');
+  const sessionId = engine.compactMemory(
+    userOf(req),
+    params.id,
+    { endpointId, model, params: gen },
+    String(template ?? DEFAULT_COMPACT_TEMPLATE),
+  );
+  sendJson(res, 200, { sessionId });
 });
 
 route('GET', '/api/presets', (req, res) => {
-  sendJson(res, 200, store.loadUser<Presets>(userOf(req), 'presets', defaultPresets));
+  // Defaults underneath the saved file, not only in its absence: an account
+  // that saved presets before a template existed would otherwise get no
+  // template at all for it, and the client's fallback is a bare placeholder.
+  sendJson(res, 200, { ...defaultPresets, ...store.loadUser<Presets>(userOf(req), 'presets', defaultPresets) });
 });
 route('PUT', '/api/presets', async (req, res) => {
   const me = userOf(req);
@@ -574,7 +632,7 @@ route('POST', '/api/roundtable/human-turn', async (req, res) => {
 route('POST', '/api/roundtable/consolidate', async (req, res) => {
   const { sessionId, endpointId, model, template, params } = await readJsonBody(req);
   if (!endpointId || !model) throw new HttpError(400, 'endpointId and model required');
-  engine.consolidateRoundtable(userOf(req), sessionId, { endpointId, model, params }, String(template ?? '{{TRANSCRIPT}}'));
+  engine.consolidateTranscript(userOf(req), sessionId, { endpointId, model, params }, String(template ?? '{{TRANSCRIPT}}'));
   sendJson(res, 200, { ok: true });
 });
 route('POST', '/api/roundtable/reroll', (req, res) => {
@@ -608,6 +666,26 @@ route('POST', '/api/chat/continue', (req, res) => {
 route('POST', '/api/chat/regenerate', (req, res) => {
   engine.chatRegenerate(userOf(req));
   sendJson(res, 200, { ok: true });
+});
+// The roundtable judge, pointed at a chat. Its consolidation entry is what
+// "Remember" turns into a persona memory.
+route('POST', '/api/chat/summarize', async (req, res) => {
+  const { sessionId, endpointId, model, template, params } = await readJsonBody(req);
+  if (!endpointId || !model) throw new HttpError(400, 'endpointId and model required');
+  engine.consolidateTranscript(userOf(req), sessionId, { endpointId, model, params }, String(template ?? DEFAULT_SUMMARIZE_TEMPLATE));
+  sendJson(res, 200, { ok: true });
+});
+/*
+ * The exact system prompt a chat config produces, for the brief to show.
+ * Computed by the same function the engine calls, for the reason the
+ * roundtable disclosure gives: a persona's memory is now a layer the client
+ * does not build, and a disclosure that drifts from reality is believed.
+ * Read-only.
+ */
+route('POST', '/api/chat/system-prompt', async (req, res) => {
+  const config = await readJsonBody(req);
+  const personas = store.loadUser<Persona[]>(userOf(req), 'personas', DEFAULT_PERSONAS);
+  sendJson(res, 200, { prompt: chat.buildSystemPrompt(config ?? {}, personas) });
 });
 
 // --- pipeline ---

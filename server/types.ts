@@ -19,10 +19,33 @@ export interface AppConfig {
   endpoints: Endpoint[];
 }
 
+/*
+ * One distilled conversation. A memory is written by a model (the summariser)
+ * over a transcript, then attached to a persona by an explicit Save - never
+ * automatically. Provenance is kept so the entry can be traced back to the
+ * conversation it came from, and judged or deleted on that basis.
+ */
+export interface MemoryEntry {
+  id: string;
+  at: string; // ISO timestamp of the save
+  text: string;
+  sessionId?: string;
+  sessionTitle?: string;
+  model?: string; // which model wrote the summary
+}
+
 export interface Persona {
   id: string;
   name: string;
   systemPrompt: string;
+  /*
+   * Kept apart from systemPrompt on purpose. The prompt is who the persona is;
+   * memories are what it has been told since. Separate fields mean a
+   * summariser can be handed the transcript without the memory (so it cannot
+   * summarise the memory back into itself), memories can be pruned without
+   * touching the prompt, and compaction rewrites only this list.
+   */
+  memories?: MemoryEntry[];
 }
 
 export interface GenParams {
@@ -129,6 +152,13 @@ export interface ChatConfig {
   personaId?: string; // base layer from personas.json
   systemPrompt?: string; // free text, layered after the persona
   params?: GenParams;
+  /*
+   * Set on a session created to compact a persona's memory. The session
+   * deliberately has no personaId - the memories are its user turn, and
+   * layering them into the system prompt as well would hand the compactor
+   * two copies. The flag lets the Save control default to "replace".
+   */
+  compactsPersonaId?: string;
 }
 
 export type SessionMode = 'council' | 'roundtable' | 'pipeline' | 'chat';
@@ -197,6 +227,8 @@ export interface StreamResult {
 export interface Presets {
   consolidatorTemplate: string;
   judgeTemplate?: string; // roundtable consolidation/judging, {{TRANSCRIPT}} placeholder
+  summarizeTemplate?: string; // chat -> persona memory, {{TRANSCRIPT}} and {{MEMORY}}
+  compactTemplate?: string; // many memories -> one, {{MEMORY}}
   councils: Array<{ id: string; name: string; config: CouncilConfig }>;
   roundtables: Array<{ id: string; name: string; config: RoundtableConfig }>;
   pipelines?: Array<{ id: string; name: string; stages: PipelineStage[] }>;
@@ -301,3 +333,31 @@ TRANSCRIPT:
 
 Summarize the discussion: the strongest points made by each participant,
 where they agreed and disagreed, and your overall verdict or synthesis.`;
+
+/*
+ * Chat -> memory. The summariser is shown what the persona ALREADY remembers
+ * and asked for the delta. Without that, every summary of a long-running
+ * relationship converges on the same five bullets, and a model that echoed a
+ * memory back during the conversation gets it recorded a second time.
+ */
+export const DEFAULT_SUMMARIZE_TEMPLATE = `You are writing a memory for an assistant persona, distilled from one conversation it just had.
+
+What the persona already remembers from earlier conversations:
+{{MEMORY}}
+
+The conversation:
+{{TRANSCRIPT}}
+
+Write the memory as short plain prose or bullets, referring to the other party as "the user". Record only what is NEW: decisions made, preferences stated, facts about the user or their projects, and threads left open. Do not repeat anything already remembered. Leave out pleasantries and anything a model would know without this conversation. If the conversation added nothing worth keeping, say so in one line.`;
+
+/*
+ * Many memories -> one. Lossy by nature, which is why it is a button and not
+ * a policy: the person decides when the list has grown past what their
+ * smallest model's window can carry, reads the result, and replaces the list
+ * only if they agree with it.
+ */
+export const DEFAULT_COMPACT_TEMPLATE = `You are compacting an assistant persona's memory: several dated summaries of earlier conversations that together have grown too long.
+
+{{MEMORY}}
+
+Rewrite them as ONE memory that keeps every decision, preference, fact and open thread still worth knowing, merges duplicates, and drops anything a later entry superseded. Keep dates where they matter. Be shorter than the input. Add nothing that is not in it.`;

@@ -90,6 +90,13 @@ const Api = {
   chatSend: (text) => Api._post('/api/chat/send', { text }),
   chatRegenerate: () => Api._post('/api/chat/regenerate'),
   chatContinue: () => Api._post('/api/chat/continue'),
+  chatSummarize: (sessionId, endpointId, model, template, params) =>
+    Api._post('/api/chat/summarize', { sessionId, endpointId, model, template, params }),
+  chatSystemPrompt: (config) => Api._post('/api/chat/system-prompt', config),
+  saveMemory: (personaId, sessionId, entryId, replace) =>
+    Api._post(`/api/personas/${encodeURIComponent(personaId)}/memories`, { sessionId, entryId, replace }),
+  compactMemory: (personaId, endpointId, model, template, params) =>
+    Api._post(`/api/personas/${encodeURIComponent(personaId)}/compact`, { endpointId, model, template, params }),
 
   pipelineStart: (config) => Api._post('/api/pipeline/start', config),
   pipelineRerun: (sessionId, stageIndex) => Api._post('/api/pipeline/rerun', { sessionId, stageIndex }),

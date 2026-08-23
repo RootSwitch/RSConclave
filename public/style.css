@@ -632,6 +632,15 @@ details.think .think-body {
     flex: 1;
 }
 .persona-row .row input { flex: 1; }
+/* One remembered conversation: provenance line over editable text. The left
+   rule groups the two without a second box inside the persona's box. */
+.memory-entry { border-left: 2px solid var(--se-border); padding-left: 8px; }
+.memory-entry textarea { width: 100%; }
+.memory-meta {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11px;
+    color: var(--se-txt-dim);
+}
 .test-result {
     font-family: ui-monospace, Consolas, monospace;
     font-size: 11px;

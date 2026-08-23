@@ -36,6 +36,7 @@ const Chat = {
         !App.isActiveSession() ? resumeButton(session.id) : null,
       ),
       this.buildBrief(session),
+      this.buildSummarizeSection(session),
     );
     this.transcriptEl = el('div', { id: 'transcript' });
     this.composeBar = el('div', { id: 'gate-bar' });
@@ -51,11 +52,45 @@ const Chat = {
     const cfg = session.config;
     const persona = App.personas.find((p) => p.id === cfg.personaId);
     if (!persona && !cfg.systemPrompt?.trim()) return null;
+    // Fetched from the server rather than assembled here, for the reason the
+    // roundtable disclosure gives: what is shown must be what is sent, and a
+    // persona's memory is now a layer this view does not build.
+    const body = el('div', { class: 'brief-scenario' }, 'loading…');
+    Api.chatSystemPrompt(cfg)
+      .then((r) => { body.textContent = r.prompt; })
+      .catch((e) => { body.textContent = `(could not load: ${e.message})`; });
     return el('details', { class: 'session-brief' },
       el('summary', {}, 'System prompt'),
-      el('div', { class: 'brief-scenario' },
-        [persona?.systemPrompt?.trim(), cfg.systemPrompt?.trim()].filter(Boolean).join('\n\n')),
+      body,
     );
+  },
+
+  /*
+   * Summarise: the roundtable's judge wearing different words. The result is
+   * a consolidation entry in this chat, which is the only kind of entry that
+   * can be saved as a persona memory - so this fold is where memory starts.
+   * In a compaction session the same fold re-runs the compaction, against the
+   * memories as they stood when the session was made (see consolidateTranscript).
+   */
+  buildSummarizeSection(session) {
+    const compacting = Boolean(session.config.compactsPersonaId);
+    return judgeSection({
+      summary: compacting
+        ? 'Re-run the compaction with another model or template'
+        : 'Summarise this conversation (for a persona memory)',
+      modelLabel: compacting ? 'Compactor' : 'Summariser',
+      roomHint: compacting
+        ? 'The compactor reads every memory at once - give it a window bigger than the list.'
+        : 'The summariser reads the whole conversation at once - give it a window bigger than the chat.',
+      templateLabel: compacting
+        ? 'Template ({{MEMORY}} = the memories being compacted)'
+        : 'Template ({{TRANSCRIPT}} = the conversation, {{MEMORY}} = what the persona already remembers)',
+      template: compacting
+        ? (App.presets.compactTemplate || '{{MEMORY}}')
+        : (App.presets.summarizeTemplate || '{{TRANSCRIPT}}'),
+      runLabel: compacting ? 'Compact again' : 'Summarise',
+      onRun: (endpointId, model, template, params) => Api.chatSummarize(session.id, endpointId, model, template, params),
+    });
   },
 
   /* ---------- setup ---------- */
@@ -63,8 +98,12 @@ const Chat = {
   buildSetup() {
     const endpoint = el('select', {});
     const model = el('select', {});
+    // The memory count rides on the name: picking a persona that remembers
+    // things is a different act from picking one that does not, and the
+    // difference should be visible where the choice is made.
     const persona = el('select', {}, el('option', { value: '' }, ' - none - '),
-      ...App.personas.map((p) => el('option', { value: p.id }, p.name)));
+      ...App.personas.map((p) => el('option', { value: p.id },
+        `${p.name}${p.memories?.length ? ` (${p.memories.length} ${p.memories.length === 1 ? 'memory' : 'memories'})` : ''}`)));
     const system = el('textarea', { rows: 4, placeholder: 'System prompt (optional) - layered after the persona…' });
     // The message box is the star of the form. It used to not exist: Start
     // Chat opened an empty transcript with a second compose box, and the
@@ -188,7 +227,10 @@ const Chat = {
 
     this.transcriptEl.replaceChildren(
       ...session.entries.map((e) => {
-        const mine = e.kind === 'user';
+        // In a compaction session the user turn is the memory list, not
+        // something the person typed - it reads as a record, not as "mine".
+        const mine = e.kind === 'user' && !session.config.compactsPersonaId;
+        const summary = e.kind === 'consolidation';
         const complete = entryComplete(e, generating && e === session.entries.at(-1));
         const textEl = el('div', { class: 'text', dataset: { entryBody: e.id } });
         if (complete && e.text) renderEntryText(textEl, e.text, e.kind);
@@ -206,6 +248,7 @@ const Chat = {
          */
         if (complete && e.text) footer.push(copyButton(() => e.text));
         if (complete && e.text) footer.push(forkButton(session.id, e.id));
+        if (summary && complete && e.text) footer.push(saveMemoryButton(session, e));
         // Only the newest reply can be continued: extending an older one would
         // rewrite history the later turns were already answering.
         // A cancelled reply is continuable for the same reason a token-limited
@@ -220,8 +263,12 @@ const Chat = {
           }, 'continue'));
         }
 
-        return el('div', { class: `bubble${mine ? ' mine' : ''}${e.kind === 'error' ? ' error' : ''}` },
-          el('div', { class: 'speaker' }, mine ? 'You' : (e.model ?? 'assistant')),
+        const speaker = mine ? 'You'
+          : summary ? `Summary - ${e.model ?? e.speaker}`
+          : e.kind === 'user' ? e.speaker
+          : (e.model ?? 'assistant');
+        return el('div', { class: `bubble${mine ? ' mine' : ''}${e.kind === 'error' ? ' error' : ''}${summary ? ' consolidation' : ''}` },
+          el('div', { class: 'speaker' }, speaker),
           textEl,
           e.kind === 'error' ? el('div', { class: 'error-text' }, e.error ?? 'error') : null,
           footer.length ? el('div', { class: 'stats row' }, ...footer) : null,
@@ -283,6 +330,9 @@ const Chat = {
     // ending on the question. Without a button for it the only way on was to
     // retype, which merged into a doubled user turn.
     const unanswered = session.entries.at(-1)?.kind === 'user';
+    // A summary is not a reply; Regenerate after one would delete it and
+    // re-answer the turn before. It re-runs from its own fold instead.
+    const lastIsSummary = session.entries.at(-1)?.kind === 'consolidation';
     this.composeBar.append(
       el('div', { class: 'row' }, box),
       el('div', { class: 'row' },
@@ -292,7 +342,7 @@ const Chat = {
               title: 'That message never got a reply. Ask again without retyping it.',
               onclick: () => once('chat-regen', () => Api.chatRegenerate()).catch((e) => alert(e.message)),
             }, 'Retry ▸')
-          : hasReply
+          : hasReply && !lastIsSummary
             ? el('button', { onclick: () => once('chat-regen', () => Api.chatRegenerate()).catch((e) => alert(e.message)) }, 'Regenerate')
             : null,
         el('span', { class: 'grow' }),

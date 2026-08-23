@@ -12,6 +12,7 @@ import type {
   CouncilConfig,
   CouncilMember,
   Endpoint,
+  MemoryEntry,
   Persona,
   PipelineConfig,
   RoundtableConfig,
@@ -26,7 +27,8 @@ import * as rt from './roundtable.ts';
 import * as council from './council.ts';
 import * as pipeline from './pipeline.ts';
 import * as chat from './chat.ts';
-import { renderTranscriptText } from './text.ts';
+import * as mem from './memory.ts';
+import { fillTemplate, renderTranscriptText, stripThink } from './text.ts';
 import { estimateMessages, OLLAMA_DEFAULT_NUM_CTX } from './tokens.ts';
 import { broadcast } from './sse.ts';
 import { InputError } from './errors.ts';
@@ -770,21 +772,28 @@ export function humanTurn(username: string, participantId: string, text: string)
 }
 
 /** Run a judge/consolidator model over the roundtable transcript. */
-export function consolidateRoundtable(
-  username: string,
-  sessionId: string,
+/*
+ * Run a model over a whole transcript and attach the result as a
+ * consolidation entry: a roundtable's judge, or a chat's summary. One path
+ * for both on purpose - a summary that can become a persona memory is a
+ * judge with a different template, and one path is one set of behaviours
+ * to keep honest.
+ *
+ * vars are the template's placeholders. {{TRANSCRIPT}} is the labelled
+ * conversation; {{MEMORY}} is what the chat's persona already remembers, so
+ * a summariser can be told to write only what is new.
+ */
+function launchConsolidation(
+  a: Active,
   member: CouncilMember,
   template: string,
+  vars: Record<string, string>,
 ): void {
-  assertIdle(username);
-  const a = requireSession(username, sessionId);
-  if (a.session.mode !== 'roundtable') throw new InputError('not a roundtable session');
-  const transcript = renderTranscriptText(a.session.entries);
-  if (!transcript) throw new InputError('nothing to consolidate yet');
-  const prompt = template.includes('{{TRANSCRIPT}}')
-    // Function replacement - a transcript is the most $-laden text in the app.
-    ? template.replaceAll('{{TRANSCRIPT}}', () => transcript)
-    : `${template.trim()}\n\nTRANSCRIPT:\n${transcript}`;
+  let prompt = fillTemplate(template, vars);
+  // A template with no placeholder at all still has to see the transcript.
+  if (!template.includes('{{TRANSCRIPT}}') && !template.includes('{{MEMORY}}')) {
+    prompt = `${template.trim()}\n\nTRANSCRIPT:\n${vars.TRANSCRIPT}`;
+  }
   launch(async () => {
     await runTurn(a, {
       member,
@@ -796,6 +805,142 @@ export function consolidateRoundtable(
       pushState();
     }
   });
+}
+
+export function consolidateTranscript(
+  username: string,
+  sessionId: string,
+  member: CouncilMember,
+  template: string,
+): void {
+  assertIdle(username);
+  const a = requireSession(username, sessionId);
+  if (a.session.mode !== 'roundtable' && a.session.mode !== 'chat') {
+    throw new InputError('only a roundtable or a chat can be consolidated this way');
+  }
+  const transcript = renderTranscriptText(a.session.entries);
+  if (!transcript) throw new InputError('nothing to consolidate yet');
+  // The persona's existing memory rides along as {{MEMORY}}. It comes from
+  // the persona record, never from the transcript - the system prompt is not
+  // an entry, so the summariser cannot see the memory except where a template
+  // chooses to show it.
+  const cfg = a.session.mode === 'chat' ? (a.session.config as ChatConfig) : undefined;
+  let memory = '';
+  if (cfg?.compactsPersonaId) {
+    // A compaction session: the memories being rewritten are its user turn,
+    // so a re-run with an edited template sees the same {{MEMORY}} the first
+    // run did - not the persona's list as it stands now, which may already
+    // hold the result of the first run.
+    memory = a.session.entries.find((e) => e.kind === 'user')?.text ?? '';
+  } else if (cfg?.personaId) {
+    const persona = getPersonas(username).find((p) => p.id === cfg.personaId);
+    if (persona) memory = mem.renderMemoryPlain(persona);
+  }
+  launchConsolidation(a, member, template, { TRANSCRIPT: transcript, MEMORY: memory || '(nothing yet)' });
+}
+
+/*
+ * Read a session without taking the box. Saving a memory from a finished
+ * conversation must not displace whoever is generating right now, and
+ * requireSession would.
+ */
+function peekSession(username: string, sessionId: string): Session {
+  if (active && active.owner === username && active.session.id === sessionId) return active.session;
+  const s = store.loadSession<Session>(username, sessionId);
+  if (!s) throw new InputError('session not found', 404);
+  return s;
+}
+
+/*
+ * Attach a consolidation entry's text to a persona as a memory. Explicit,
+ * per entry, never automatic: a summary of your conversations is the most
+ * sensitive thing this app can hold, so nothing becomes one without a click
+ * on the text it came from.
+ */
+export function saveMemory(
+  username: string,
+  personaId: string,
+  sessionId: string,
+  entryId: string,
+  replace: boolean,
+): Persona {
+  const session = peekSession(username, sessionId);
+  const entry = session.entries.find((e) => e.id === entryId);
+  if (!entry) throw new InputError('entry not found', 404);
+  // Only a consolidation - a summary, a verdict, a council's synthesis. A raw
+  // reply is a turn in a conversation, not a distillation of one, and
+  // "summaries become memories" is a rule simple enough to hold in your head.
+  if (entry.kind !== 'consolidation') throw new InputError('only a summary or consolidation can be saved as a memory');
+  const text = stripThink(entry.text).trim();
+  if (!text) throw new InputError('that entry has no text to remember');
+  const personas = getPersonas(username);
+  const persona = personas.find((p) => p.id === personaId);
+  if (!persona) throw new InputError('persona not found', 404);
+  const m: MemoryEntry = {
+    id: store.newId(),
+    at: new Date().toISOString(),
+    text,
+    sessionId: session.id,
+    sessionTitle: session.title,
+    model: entry.model,
+  };
+  persona.memories = replace ? [m] : [...(persona.memories ?? []), m];
+  store.saveUser(username, 'personas', personas);
+  return persona;
+}
+
+/*
+ * Compaction is a session, not a hidden call: a chat whose one user turn is
+ * the memory as it stands, and whose consolidation is the rewrite. The before
+ * and after sit side by side, the template can be edited and re-run like any
+ * judge, and nothing is replaced until Save says so.
+ *
+ * No personaId on the session - see ChatConfig.compactsPersonaId.
+ */
+export function compactMemory(
+  username: string,
+  personaId: string,
+  member: CouncilMember,
+  template: string,
+): string {
+  assertIdle(username);
+  const persona = getPersonas(username).find((p) => p.id === personaId);
+  if (!persona) throw new InputError('persona not found', 404);
+  const memory = mem.renderMemoryPlain(persona);
+  if (!memory) throw new InputError('this persona has no memories to compact');
+  releaseActive(username);
+  takeover(username);
+  const config: ChatConfig = {
+    endpointId: member.endpointId,
+    model: member.model,
+    params: member.params,
+    compactsPersonaId: personaId,
+  };
+  const session: Session = {
+    id: store.newId(),
+    mode: 'chat',
+    title: `Memory compaction: ${persona.name}`,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    config,
+    entries: [],
+    status: 'active',
+    defaultEndpointId: firstEndpointOf(config),
+  };
+  active = {
+    owner: username,
+    session,
+    abort: null,
+    autoRemaining: 0,
+    pauseRequested: false,
+    phase: 'generating',
+    waitingFirstToken: false,
+  };
+  addEntry({ kind: 'user', speaker: `Memory of ${persona.name} before compaction`, text: memory });
+  persist();
+  pushState();
+  launchConsolidation(active, member, template, { TRANSCRIPT: memory, MEMORY: memory });
+  return session.id;
 }
 
 export function inject(username: string, text: string, as: 'narrator' | 'user'): void {
@@ -902,6 +1047,10 @@ export function chatRegenerate(username: string): void {
   const entries = a.session.entries;
   const last = entries.at(-1);
   if (!last) throw new InputError('nothing to regenerate');
+  // The transcript ends on a summary, which is not a reply. Regenerating "the
+  // last reply" would delete the summary and re-answer the turn before it -
+  // two surprises for one click. A summary re-runs from its own panel.
+  if (last.kind === 'consolidation') throw new InputError('the last entry is a summary, not a reply - re-run it from the summarise panel');
   /*
    * The transcript ends with a message that never got a reply. That happens when
    * the turn failed before its entry existed - endpointById throws inside

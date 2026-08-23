@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+**Personas can remember.** A persona was a system prompt and nothing more:
+every chat with it started from zero, and the only way to carry anything
+across was to paste it into the prompt by hand. A chat now has a **Summarise**
+fold - the roundtable's judge pointed at a conversation - whose output can be
+saved to a persona with **Remember**. From then on that persona's memories go
+into every chat and every roundtable seat that wears it, after its own prompt
+and framed as things it remembers rather than as instructions; the System
+prompt fold on a session shows exactly what went out. The summariser is shown
+what the persona already remembers and asked to write only what is new, so a
+long-running relationship does not converge on the same five bullets, and it
+can never see the memory inside the transcript, because the system prompt is
+not a transcript entry. Nothing is remembered without a click on the text that
+becomes the memory. Settings lists every memory with its date, author model
+and source conversation, editable and deletable, with a rough count of the
+tokens they add to each turn. **Compact** rewrites a long list as one entry,
+as a session you read before choosing to replace the list - summaries of
+summaries lose resolution, and that is a decision, not a policy. Any
+consolidation can become a memory: a council's synthesis or a roundtable
+verdict as readily as a chat summary. Deliberately a dated list and not a
+database - small enough to read, and reading it is the point.
+
 **A turn that stopped short says so on screen, not just to the consolidator.**
 A council member that hit its output cap or died mid-stream took the same green
 "done" pill as one that answered in full. The transcript handed to the

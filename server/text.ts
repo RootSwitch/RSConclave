@@ -53,6 +53,19 @@ export function incompleteNote(e: TranscriptEntry): string {
   return '';
 }
 
+/*
+ * Fill {{KEY}} placeholders. Function replacement throughout, because the
+ * values are transcripts and memories - the most $-laden text in the app,
+ * and String.replace treats $& and $1 in a replacement STRING as patterns.
+ */
+export function fillTemplate(template: string, vars: Record<string, string>): string {
+  let out = template;
+  for (const [key, value] of Object.entries(vars)) {
+    out = out.replaceAll(`{{${key}}}`, () => value);
+  }
+  return out;
+}
+
 /** Render a roundtable transcript as plain labeled text for judging/consolidation. */
 export function renderTranscriptText(entries: TranscriptEntry[]): string {
   const lines: string[] = [];

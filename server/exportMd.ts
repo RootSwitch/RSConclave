@@ -84,7 +84,9 @@ export function sessionToMarkdown(session: Session): string {
   for (const e of session.entries) {
     const label =
       e.kind === 'consolidation'
-        ? `Consolidation - ${e.speaker}`
+        // In a chat the consolidation is a summary written for memory; the
+        // word "consolidation" there would send a reader looking for members.
+        ? `${session.mode === 'chat' ? 'Summary' : 'Consolidation'} - ${e.speaker}`
         : e.model && e.speaker !== e.model
           ? `${e.speaker} (${e.model})`
           : e.speaker;

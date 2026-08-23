@@ -263,13 +263,64 @@ const Settings = {
       // long-form, where Enter must stay a newline.
       onEnterSubmit([els.name], () => save().then(() => alert('saved')).catch((e) => alert(e.message)));
       const id = p?.id ?? 'ps' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-      const rowObj = { id, els };
+
+      /*
+       * What this persona remembers, editable in place. The text is editable
+       * because a model wrote it and the person is the editor of record;
+       * the provenance line is shown because "where did it get that idea" is
+       * the first question a wrong memory raises. Deleting is unsaved until
+       * Save, like everything else on this page.
+       */
+      const memories = (p?.memories ?? []).map((m) => ({ entry: m, textEl: el('textarea', { rows: 3 }, m.text) }));
+      const rowObj = { id, els, memories };
+      const memWrap = el('div', { class: 'col' });
+      const memHeader = el('span', { class: 'muted' });
+      const syncMem = () => {
+        const live = memories.map((m) => m.textEl.value).join('\n\n');
+        memHeader.textContent = memories.length
+          ? `${memories.length} ${memories.length === 1 ? 'memory' : 'memories'} · ~${Math.ceil(live.length / 4)} tok sent with every turn`
+          : 'nothing yet - summarise a chat, then press Remember on the summary';
+      };
+      const renderMem = () => {
+        memWrap.replaceChildren(...memories.map((m) => {
+          const meta = `${m.entry.at.slice(0, 10)}`
+            + (m.entry.model ? ` · ${m.entry.model}` : '')
+            + (m.entry.sessionTitle ? ` · from "${m.entry.sessionTitle}"` : '');
+          const forget = el('button', { class: 'danger mini', title: 'Forget this (press Save to keep the change)', onclick: () => {
+            memories.splice(memories.indexOf(m), 1);
+            renderMem();
+          } }, '✕');
+          m.textEl.oninput = syncMem;
+          return el('div', { class: 'memory-entry' },
+            el('div', { class: 'row memory-meta' }, el('span', {}, meta), el('span', { class: 'grow' }), forget),
+            m.textEl);
+        }));
+        syncMem();
+      };
+      renderMem();
+      // Compaction runs against the memories as SAVED, so the label says so;
+      // the result opens as its own session and replaces nothing by itself.
+      const compact = p?.memories?.length
+        ? judgeSection({
+            summary: 'Compact these memories into one',
+            modelLabel: 'Compactor',
+            roomHint: 'The compactor reads every memory at once - give it a window bigger than the list.',
+            templateLabel: 'Template ({{MEMORY}} = the memories as last saved)',
+            template: App.presets.compactTemplate || '{{MEMORY}}',
+            runLabel: 'Compact',
+            onRun: async (endpointId, model, template, params) => {
+              const r = await Api.compactMemory(id, endpointId, model, template, params);
+              await openSession(r.sessionId);
+            },
+          })
+        : null;
 
       const title = el('span', { class: 'persona-title' });
       const preview = el('span', { class: 'persona-preview' });
       const syncSummary = () => {
         title.textContent = els.name.value.trim() || '(unnamed persona)';
-        preview.textContent = els.prompt.value.trim().replace(/\s+/g, ' ');
+        preview.textContent = (memories.length ? `[${memories.length} remembered] ` : '')
+          + els.prompt.value.trim().replace(/\s+/g, ' ');
       };
       els.name.addEventListener('input', syncSummary);
       els.prompt.addEventListener('input', syncSummary);
@@ -289,16 +340,27 @@ const Settings = {
         el('summary', {}, title, preview, el('span', { class: 'grow' }), delBtn),
         el('div', { class: 'col' },
           el('div', { class: 'row' }, el('label', {}, 'Name'), els.name),
-          els.prompt));
+          els.prompt,
+          el('div', { class: 'row' }, el('label', {}, 'Memory'), memHeader),
+          memWrap,
+          compact));
       if (!p) row.open = true; // a persona you just added needs filling in
       rowsWrap.append(row);
       rows.push(rowObj);
     };
 
     const save = async () => {
+      // Memories are sent as this page knows them - edited text, minus the
+      // forgotten ones. Sending the key at all is what lets a deletion stick;
+      // a client that omits it leaves the server's copy alone (see PUT).
       const personas = rows
         .filter((r) => r.els.name.value.trim())
-        .map((r) => ({ id: r.id, name: r.els.name.value.trim(), systemPrompt: r.els.prompt.value }));
+        .map((r) => ({
+          id: r.id,
+          name: r.els.name.value.trim(),
+          systemPrompt: r.els.prompt.value,
+          memories: r.memories.map((m) => ({ ...m.entry, text: m.textEl.value })),
+        }));
       await Api.putPersonas(personas);
       App.personas = personas;
     };
