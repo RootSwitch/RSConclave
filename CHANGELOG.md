@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+**A council says whether the prompt fits before you run it.** Pasting a long
+document into a council was a guess: the model list showed each seat's window,
+but nothing said how big the prompt was, so the only way to find out was to
+send it to a model with a known-large window, read the context meter
+afterwards, and work backwards - a whole run spent answering a question the
+app could answer while you type. The prompt box now carries a live estimate
+("about 21k tokens"), and any seat that cannot take it is marked. Two markers,
+because there are two different problems: amber **needs ~22k** means the
+window is too small as set and a bigger `num_ctx` on that row fixes it, red
+**over its 8k limit** means the prompt exceeds what the model was trained for
+and no setting will help. The amber hover adds the part that is easy to miss -
+raising a seat past its Modelfile default is where it can stop fitting in VRAM
+and start spilling into system RAM. **Fit this prompt** does the arithmetic
+for every checked seat at once, capped at each model's trained maximum, and
+names the ones it could not help. Seats already big enough are left alone,
+since their number may have been measured rather than guessed.
+
+The consolidator is marked too, on a projection, because it is the seat most
+likely to overflow and the only one whose real input cannot be known in
+advance - it reads the prompt plus every answer, and the answers do not exist
+yet. The hover states the assumption it is built on rather than presenting a
+confident number. All of it is an estimate at four characters per token, which
+runs low on exactly the text most worth checking, so every figure is phrased
+as "about" and the markers leave room for a reply on top.
+
 **Personas can remember.** A persona was a system prompt and nothing more:
 every chat with it started from zero, and the only way to carry anything
 across was to paste it into the prompt by hand. A chat now has a **Summarise**

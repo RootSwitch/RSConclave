@@ -129,8 +129,31 @@ const Council = {
     const syncConsolidatorCtx = ollamaOnly(consolidatorCtxEl, consolidatorSel, (s) => (s.value || '|').split('|')[0]);
     const errEl = el('div', { class: 'error-text' });
 
+    /*
+     * Right-sizing the council for the prompt, before spending a run on it.
+     * Without this the only way to learn a prompt was too big for a seat was
+     * to send it to a model with a known-large window, read the context meter
+     * afterwards, and work backwards - which is a whole run to answer a
+     * question the app could answer while you type.
+     */
+    const promptSizeEl = el('span', { class: 'prompt-size' });
+    const fitSummaryEl = el('span', { class: 'muted' });
+    const consolidatorFitEl = el('span', { class: 'fit-tag' });
+    const fitBtn = el('button', {
+      title: 'Raise the ctx of every checked member (and the consolidator) to a window this prompt fits in, capped at what each model was trained for.',
+      onclick: () => this.fitPrompt(),
+    }, 'Fit this prompt');
+
     this.form = { promptEl, consolidatorSel, templateEl, unloadEl, ballotEl, consolidateEl, consolidatorCtxEl,
-      consolidatorMaxOutEl, syncConsolidatorCtx, errEl, memberRows: [], modelListEl };
+      consolidatorMaxOutEl, syncConsolidatorCtx, errEl, memberRows: [], modelListEl,
+      promptSizeEl, fitSummaryEl, consolidatorFitEl, fitBtn };
+
+    // Cheap enough to run on every keystroke: the estimate is a length read,
+    // and the row loop is as long as the model list.
+    promptEl.addEventListener('input', () => this.refreshFit());
+    consolidatorSel.addEventListener('change', () => this.refreshFit());
+    consolidatorCtxEl.addEventListener('input', () => this.refreshFit());
+    consolidateEl.addEventListener('change', () => this.refreshFit());
 
     const presetSel = el('select', {}, el('option', { value: '' }, ' - load preset - '),
       ...App.presets.councils.map((p) => el('option', { value: p.id }, p.name)));
@@ -148,6 +171,7 @@ const Council = {
       consolidatorSel,
       consolidatorCtxEl,
       consolidatorMaxOutEl,
+      consolidatorFitEl,
       el('span', { class: 'muted', title: 'The consolidator reads every response at once - it usually needs the biggest window of all.' }, '⟵ give it room'),
     );
     const templateDetails = el('details', {},
@@ -172,6 +196,7 @@ const Council = {
         presetDeleteButton(() => this.form.presetSel, 'councils'),
       ),
       promptEl,
+      el('div', { class: 'row' }, promptSizeEl, fitSummaryEl, el('span', { class: 'grow' }), fitBtn),
       el('label', {}, 'Council members (queried in order, one at a time - ＋ adds the same model again, e.g. at another temperature)'),
       modelListEl,
       el('div', { class: 'row' },
@@ -210,7 +235,14 @@ const Council = {
     const ctx = ctxInput(opts.numCtx);
     ollamaOnly(ctx, endpointId); // fixed endpoint for this row, so no re-sync needed
     const maxOut = maxTokensInput(opts.maxTokens);
-    const row = { endpointId, model, cb, tempInput: temp, ctxInput: ctx, maxOutInput: maxOut, isClone: !!opts.isClone };
+    // Every row carries its own fit tag, clones included: a clone shares the
+    // model but has its own ctx box, so it can be sized differently.
+    const fitEl = el('span', { class: 'fit-tag' });
+    const row = { endpointId, model, cb, tempInput: temp, ctxInput: ctx, maxOutInput: maxOut, fitEl, isClone: !!opts.isClone };
+    // Typing a bigger window must clear the warning it caused, or the fix
+    // looks like it did nothing until the next render.
+    ctx.addEventListener('input', () => this.refreshFit());
+    cb.addEventListener('change', () => this.refreshFit());
 
     const controls = [];
     if (opts.isClone) {
@@ -234,10 +266,108 @@ const Council = {
       cb, el('span', { title: modelLabel(endpointId, model) === model ? null : model },
         (opts.isClone ? '↳ ' : '') + modelLabel(endpointId, model)),
       opts.isClone ? null : ctxTag(endpointId, model),
+      fitEl,
       el('span', { class: 'grow' }),
       temp, ctx, maxOut, ...controls);
     this.form.memberRows.push(row);
     return row;
+  },
+
+  /*
+   * Redraw every fit marker from the prompt as it stands. Members are judged
+   * on the prompt; the consolidator is judged on a PROJECTION, because its
+   * real input is the prompt plus every reply and those do not exist yet.
+   * The assumption behind the projection is named in the hover rather than
+   * buried, since a confident wrong number is worse than an honest estimate.
+   */
+  refreshFit() {
+    const f = this.form;
+    if (!f) return;
+    const needed = estimateTokens(f.promptEl.value);
+    f.promptSizeEl.textContent = needed ? `about ${fmtK(needed)} tokens` : '';
+    f.promptSizeEl.title = needed
+      ? 'Rough estimate at four characters per token. Markdown, code and JSON pack more tokens per character than prose, so treat this as a floor.'
+      : '';
+
+    let checked = 0;
+    let short = 0;
+    for (const row of f.memberRows) {
+      const verdict = fitVerdict(needed, App.modelInfo(row.endpointId, row.model), row.ctxInput.value);
+      renderFitTag(row.fitEl, verdict);
+      if (row.cb.checked) {
+        checked++;
+        if (verdict) short++;
+      }
+    }
+
+    // The consolidator reads the prompt plus every answer. Projected, and
+    // only when it is actually going to run.
+    const [cEp, cModel] = (f.consolidatorSel.value || '|').split('|');
+    const projected = needed + checked * ASSUMED_REPLY_TOKENS;
+    const consolidatorVerdict = f.consolidateEl.checked
+      ? fitVerdict(projected, App.modelInfo(cEp, cModel), f.consolidatorCtxEl.value)
+      : null;
+    renderFitTag(f.consolidatorFitEl, consolidatorVerdict);
+    if (consolidatorVerdict) {
+      f.consolidatorFitEl.title += ` Projected from the prompt plus ${checked} ${checked === 1 ? 'reply' : 'replies'} at an assumed ${fmtK(ASSUMED_REPLY_TOKENS)} each - a guess, since the replies do not exist yet.`;
+    }
+
+    if (!needed || !checked) {
+      f.fitSummaryEl.textContent = '';
+      return;
+    }
+    f.fitSummaryEl.textContent = short
+      ? `- ${short} of ${checked} checked ${short === 1 ? 'member needs' : 'members need'} a bigger window`
+      : `- all ${checked} checked ${checked === 1 ? 'member has' : 'members have'} room`;
+  },
+
+  /*
+   * Raise every checked seat to a window this prompt fits in. Only ever
+   * raises: a seat already big enough is left alone, because its number may
+   * have been measured (see tools/measure-ctx.sh) and lowering it to a
+   * computed one would throw that away.
+   */
+  fitPrompt() {
+    const f = this.form;
+    const needed = estimateTokens(f.promptEl.value);
+    if (!needed) { f.fitSummaryEl.textContent = '- nothing to fit yet'; return; }
+    const rows = f.memberRows.filter((r) => r.cb.checked);
+    if (!rows.length) { f.fitSummaryEl.textContent = '- check some members first'; return; }
+
+    // Round up to a whole 1k: num_ctx is allocated in blocks anyway, and a
+    // round number in the box is easier to recognise as deliberate later.
+    const target = (want) => Math.ceil(want / 1024) * 1024;
+    let raised = 0;
+    const stuck = [];
+    const raise = (input, info, want, label) => {
+      if (!info) return; // no /api/show data: nothing to be confident about
+      if (info.contextLength && want > info.contextLength) { stuck.push(label); return; }
+      const current = Number(input.value) > 0 ? Number(input.value) : (info.numCtx ?? 4096);
+      const to = target(want);
+      if (current >= to) return;
+      input.value = to;
+      raised++;
+    };
+
+    for (const row of rows) {
+      raise(row.ctxInput, App.modelInfo(row.endpointId, row.model),
+        needed + REPLY_HEADROOM_TOKENS, modelLabel(row.endpointId, row.model));
+    }
+    if (f.consolidateEl.checked) {
+      const [cEp, cModel] = (f.consolidatorSel.value || '|').split('|');
+      raise(f.consolidatorCtxEl, App.modelInfo(cEp, cModel),
+        needed + rows.length * ASSUMED_REPLY_TOKENS + REPLY_HEADROOM_TOKENS, modelLabel(cEp, cModel));
+    }
+
+    this.refreshFit();
+    // Say what happened rather than leaving the boxes to be noticed, and name
+    // the seats no setting can help - their markers stay red, but the reason
+    // belongs in words too.
+    const parts = [];
+    if (raised) parts.push(`raised ${raised} ${raised === 1 ? 'seat' : 'seats'}`);
+    if (stuck.length) parts.push(`${stuck.join(', ')} cannot fit it at all`);
+    if (!parts.length) parts.push('every checked seat already had room');
+    f.fitSummaryEl.textContent = `- ${parts.join('; ')}`;
   },
 
   async populateModels() {
@@ -271,6 +401,9 @@ const Council = {
       }
     }
     this.form.syncConsolidatorCtx(); // the select finally has a value to read
+    // Rows exist now, and a cloned session arrives with its prompt already
+    // filled - so the markers have something to say before any keystroke.
+    this.refreshFit();
   },
 
   collectConfig() {
@@ -350,6 +483,9 @@ const Council = {
     f.consolidatorCtxEl.value = config.consolidator.params?.num_ctx ?? '';
     f.unloadEl.checked = !!config.unloadBetweenModels;
     f.ballotEl.value = (config.ballot ?? []).join(', ');
+    // A preset or clone changes which seats are checked and what windows they
+    // carry, and neither fires an input event.
+    this.refreshFit();
   },
 
   async savePreset() {
@@ -581,3 +717,11 @@ const Council = {
     this.renderCards();
   },
 };
+
+/*
+ * Once, at module scope, not per setup build. /api/show lands well after the
+ * checklist is drawn - a seat's window is unknown until it does - and a
+ * listener registered inside buildSetup would leave one more stale call
+ * behind every time a council was configured.
+ */
+document.addEventListener('model-info-loaded', () => Council.refreshFit());

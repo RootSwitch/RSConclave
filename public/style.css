@@ -431,6 +431,12 @@ details[open] summary { margin-bottom: 9px; }
 .model-item input[type="number"] { width: 62px; padding: 2px 6px; font-size: 12px; }
 .endpoint-group-label { margin-top: 7px; }
 .ctx-tag { font-size: 11px; color: var(--se-txt-dim); white-space: nowrap; }
+/* Silent when a seat has room: only a problem earns a mark. Two colours for
+   two remedies - amber is fixable with a bigger ctx, red is not fixable. */
+.fit-tag { font-size: 11px; white-space: nowrap; font-weight: 600; }
+.fit-tag.raise { color: var(--se-warn); }
+.fit-tag.over { color: var(--se-down); }
+.prompt-size { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--se-txt-dim); }
 
 /* ===== Roundtable ===== */
 .participant-row, .stage-row {

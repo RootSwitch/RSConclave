@@ -55,6 +55,10 @@ and every transcript **exports** as markdown.
   Re-run individual members or just the consolidation (with an edited template) at any time.
   **Skip** abandons a member that is crawling and moves to the next one, keeping the answers
   already collected - Cancel, which ends the whole run, used to be the only way out.
+  The prompt box estimates its own size as you type, and any seat too small for it is marked -
+  amber when a bigger `num_ctx` on that row would fix it, red when the prompt is past what the
+  model was trained for. **Fit this prompt** raises every checked seat at once, capped at each
+  model's trained maximum. See [Right-sizing a council](#right-sizing-a-council).
   The same model can sit on the council more than once (the + on a model row) at different
   temperatures - self-consistency for free. After the synthesis, ask a **follow-up round**:
   every member answers the new question with its own previous answer as context. Give it a
@@ -158,6 +162,35 @@ the 4k server default. The status-strip meter measures each turn's actual prompt
 *current speaker's* window, turns red past 90%, and warns explicitly past 100%. Fix a too-small
 window by setting `num_ctx` per participant or member (next to the temperature field), in the
 Modelfile, or with `OLLAMA_CONTEXT_LENGTH` on the server. Bigger windows cost VRAM.
+
+### Right-sizing a council
+
+The meter above measures a turn that has already been sent. A council setup answers the
+question before you spend a run on it: paste a long document into the prompt box and it reports
+its own size ("about 21k tokens"), then marks every seat that cannot take it.
+
+The two markers have two different remedies, which is why they are not one:
+
+| marker | meaning | fix |
+|---|---|---|
+| amber `needs ~22k` | the seat's window is too small **as set** | raise that row's `num_ctx`, or press Fit this prompt |
+| red `over its 8k limit` | past what the model was **trained** for | none - pick a different model |
+
+**Fit this prompt** raises every checked seat to a window that clears the estimate, capped at
+each model's trained maximum, and names the seats it could not help. It only ever raises: a
+seat already big enough is left alone, because its number may have been measured with
+`measure-ctx.sh` and replacing that with a computed one would throw the measurement away.
+
+Two honest limits. The estimate is four characters per token and runs **low** on markdown,
+code and JSON - the text most worth checking - so treat every figure as a floor; the markers
+add room for a reply on top, but a reasoning model that spends its budget inside `<think>`
+wants more. And the consolidator is marked on a *projection*, because its real input is the
+prompt plus every answer and the answers do not exist yet; the hover states the per-reply
+assumption it is built on. It is the seat most likely to overflow, so it is worth checking
+even though its number is the softest.
+
+Raising a seat past its Modelfile default is also where it can stop being GPU-resident, which
+the amber hover says. That is the same trade the next section measures.
 
 How much VRAM is not something a table can tell you: attention geometry matters as much as
 parameter count, so sliding-window and hybrid-Mamba models cost almost nothing per token while

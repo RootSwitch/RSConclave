@@ -131,6 +131,85 @@ function statsLine(stats) {
 }
 
 /** 4096 → "4k", 262144 → "256k", 1200 → "1.2k" */
+/*
+ * Client-side twin of estimate() in server/tokens.ts, same four-chars-per-token
+ * rule. Duplicated rather than fetched: this runs on every keystroke of a
+ * prompt that may be tens of thousands of characters, and a round trip per
+ * character to agree with the server would cost more than the two drifting.
+ * If one changes, change both.
+ *
+ * It is a rough count and it runs LOW on the text most worth checking:
+ * markdown with code blocks, paths and JSON packs more tokens per character
+ * than prose. Everything built on it is therefore phrased as "about".
+ */
+function estimateTokens(text) {
+  return Math.ceil((text ?? '').length / 4);
+}
+
+/*
+ * Room left for the answer. num_ctx covers input AND output, so a prompt that
+ * exactly fills the window leaves the model nowhere to reply from. A reasoning
+ * model that spends its budget inside <think> wants considerably more than
+ * this; the figure is a floor, not a recommendation.
+ */
+const REPLY_HEADROOM_TOKENS = 1024;
+
+/*
+ * What one member's answer costs the consolidator, for projecting a run that
+ * has not happened yet. There is no honest way to know this in advance - the
+ * responses do not exist - so the assumption is stated wherever the number
+ * derived from it is shown.
+ */
+const ASSUMED_REPLY_TOKENS = 1024;
+
+/**
+ * Can this seat take a prompt of `needed` tokens? Three answers, because a
+ * model has three different ceilings:
+ *
+ *   null    - fits the window this seat is set to use, or nothing is known
+ *   'raise' - too small as set, but the model was TRAINED for more, so a
+ *             bigger num_ctx on this row fixes it
+ *   'over'  - past what the model was trained for; no setting fixes that,
+ *             and Ollama will silently truncate the prompt from the front
+ *
+ * The distinction matters because the two have different remedies, and the
+ * old single "too big" answer sent you looking for a setting that could not
+ * help. 'raise' additionally reports whether the new window would exceed the
+ * model's baked-in default, which is the point where it may stop being
+ * VRAM-resident and start spilling into system RAM.
+ */
+function fitVerdict(needed, info, overrideCtx) {
+  if (!needed || !info) return null;
+  const want = needed + REPLY_HEADROOM_TOKENS;
+  const baked = info.numCtx ?? 4096;
+  const override = Number(overrideCtx);
+  const window = override > 0 ? override : baked;
+  if (want <= window) return null;
+  const trained = info.contextLength;
+  return { kind: trained && want > trained ? 'over' : 'raise', want, window, trained, baked };
+}
+
+/** Fill a span with a seat's fit warning, or empty it when there is none. */
+function renderFitTag(span, verdict) {
+  if (!verdict) {
+    span.textContent = '';
+    span.className = 'fit-tag';
+    span.title = '';
+    return;
+  }
+  span.className = `fit-tag ${verdict.kind}`;
+  if (verdict.kind === 'over') {
+    span.textContent = `over its ${fmtK(verdict.trained)} limit`;
+    span.title = `This prompt needs about ${fmtK(verdict.want)} tokens including room to reply, but this model was trained for ${fmtK(verdict.trained)}. No num_ctx setting fixes that - Ollama would truncate the prompt from the front, which is where a system prompt lives.`;
+    return;
+  }
+  span.textContent = `needs ~${fmtK(verdict.want)}`;
+  const spill = verdict.want > verdict.baked
+    ? ` Above its Modelfile default of ${fmtK(verdict.baked)} it may stop fitting in VRAM and spill into system RAM.`
+    : '';
+  span.title = `This seat is set to ${fmtK(verdict.window)}; the prompt needs about ${fmtK(verdict.want)} including room to reply. Raise this row's ctx, or use Fit this prompt.${spill}`;
+}
+
 function fmtK(n) {
   if (n === null || n === undefined) return '?';
   if (n < 1000) return String(n);
