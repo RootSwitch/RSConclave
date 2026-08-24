@@ -261,6 +261,18 @@ function renderFitTag(span, verdict) {
   span.title = `This seat is set to ${fmtK(verdict.window)}; the text it is given needs about ${fmtK(verdict.want)} including room to reply. Raise this seat's ctx to at least that.${spill}`;
 }
 
+/**
+ * The persona behind a session, but only when it actually remembers things.
+ * A persona with no memories is just a system prompt, and marking those would
+ * make the mark mean nothing.
+ */
+function rememberingPersona(session) {
+  const id = session?.personaId ?? session?.config?.personaId;
+  if (!id) return null;
+  const p = App.personas.find((x) => x.id === id);
+  return p?.memories?.length ? p : null;
+}
+
 function fmtK(n) {
   if (n === null || n === undefined) return '?';
   if (n < 1000) return String(n);
@@ -520,11 +532,16 @@ function entryStatus(entry, complete) {
  * a failure lands in an alert rather than nowhere, and the button is held
  * down meanwhile so a slow server cannot collect two clicks.
  */
-function judgeSection({ summary, modelLabel, templateLabel, templates, template, runLabel, roomHint, onRun, open = false }) {
+function judgeSection({ summary, modelLabel, templateLabel, templates, template, runLabel, roomHint, onRun, seat, onSeat, open = false }) {
   // Single-template callers pass a literal string; normalise to the list form.
   const list = templates ?? [{ key: null, name: '', fallback: template ?? '' }];
   const endpointSel = el('select', {}, ...App.config.endpoints.map((ep) => el('option', { value: ep.id }, ep.name)));
   const modelSel = el('select', {});
+  // A remembered seat (a pairing's summariser) is preselected, so the
+  // combination you settled on is the one already in the boxes.
+  if (seat?.endpointId && [...endpointSel.options].some((o) => o.value === seat.endpointId)) {
+    endpointSel.value = seat.endpointId;
+  }
   const fillModels = async () => {
     modelSel.replaceChildren(el('option', {}, 'loading…'));
     try {
@@ -532,6 +549,7 @@ function judgeSection({ summary, modelLabel, templateLabel, templates, template,
       const models = await App.loadModels(epId);
       await App.loadModelInfo(epId).catch(() => {});
       modelSel.replaceChildren(...displayModels(epId, models).map((m) => modelOption(epId, m)));
+      if (seat?.model && models.includes(seat.model)) modelSel.value = seat.model;
     } catch {
       modelSel.replaceChildren(el('option', {}, 'error'));
     }
@@ -574,7 +592,11 @@ function judgeSection({ summary, modelLabel, templateLabel, templates, template,
     runBtn.disabled = true;
     try {
       await persist(); // running is as good a moment to keep an edit as blurring
-      await onRun(endpointSel.value, modelSel.value, templateEl.value, genParams(undefined, ctxEl.value, maxOutEl.value));
+      const params = genParams(undefined, ctxEl.value, maxOutEl.value);
+      await onRun(endpointSel.value, modelSel.value, templateEl.value, params);
+      // Learned from use rather than configured: the summariser you actually
+      // ran becomes the one this pairing offers next time.
+      await onSeat?.({ endpointId: endpointSel.value, model: modelSel.value, params });
     } catch (e) {
       alert(e.message);
     } finally {
@@ -613,19 +635,45 @@ function judgeSection({ summary, modelLabel, templateLabel, templates, template,
 function saveMemoryButton(session, entry) {
   const wrap = el('span', { class: 'row', style: 'gap: 6px' });
   const compacting = session.config?.compactsPersonaId;
+  /*
+   * The summariser said there was nothing worth keeping. Say so where the
+   * button would be rather than offering one that the server will refuse -
+   * and never store the sentence, which is how a persona ended up
+   * remembering commentary about summarising instead of facts.
+   */
+  const body = stripThinkText(entry.text).trim();
+  if (body.length <= 120 && /NOTHING NEW/i.test(body)) {
+    wrap.append(el('span', { class: 'muted', title: 'The summariser found nothing in this conversation worth adding to the memory.' },
+      'nothing to remember'));
+    return wrap;
+  }
   const open = () => {
     if (!App.personas.length) { alert('No personas yet - add one in Settings first.'); return; }
     const personaSel = el('select', {}, ...App.personas.map((p) =>
       el('option', { value: p.id }, `${p.name}${p.memories?.length ? ` (${p.memories.length})` : ''}`)));
     if (compacting && App.personas.some((p) => p.id === compacting)) personaSel.value = compacting;
-    const save = async (replaceAll) => {
+    const save = async (replaceAll, force) => {
       try {
-        const persona = await Api.saveMemory(personaSel.value, session.id, entry.id, replaceAll);
+        const persona = await Api.saveMemory(personaSel.value, session.id, entry.id, replaceAll, force);
         const i = App.personas.findIndex((p) => p.id === persona.id);
         if (i >= 0) App.personas[i] = persona; else App.personas.push(persona);
         const n = persona.memories?.length ?? 0;
         wrap.replaceChildren(el('span', { class: 'muted' }, `remembered by ${persona.name} (${n} ${n === 1 ? 'memory' : 'memories'})`));
       } catch (e) {
+        /*
+         * A near-duplicate is refused with 409 rather than saved quietly,
+         * because it usually means the summariser echoed a memory instead of
+         * reading the conversation. Offered rather than blocked: sometimes two
+         * conversations really do cover the same ground.
+         */
+        if (e.status === 409 && !force) {
+          wrap.replaceChildren(
+            el('span', { class: 'fit-tag raise' }, e.message),
+            el('button', { class: 'mini', onclick: () => save(replaceAll, true) }, 'Save anyway'),
+            el('button', { class: 'mini', onclick: () => wrap.replaceChildren(btn) }, 'Cancel'),
+          );
+          return;
+        }
         alert(e.message);
       }
     };
@@ -1380,11 +1428,17 @@ async function renderSessionList() {
               },
             })
           : null,
-        el('span', {}, s.title),
+        // A conversation wearing a persona that remembers is not an ordinary
+        // chat: what is said in it can outlive it, so it is worth knowing
+        // before opening - and worth thinking twice about deleting.
+        el('span', { class: rememberingPersona(s) ? 'sess-memory' : null },
+          rememberingPersona(s) ? '◈ ' : '', s.title),
         el(
           'span',
           { class: 'sess-meta' },
-          el('span', {}, `${s.mode} · ${s.status}`),
+          el('span', {}, rememberingPersona(s)
+            ? `${s.mode} · memory: ${rememberingPersona(s).name} · ${s.status}`
+            : `${s.mode} · ${s.status}`),
           ...(s.tags?.length ? [el('span', { class: 'sess-tags' }, s.tags.join(' · '))] : []),
           el('span', {
             class: 'sess-del',

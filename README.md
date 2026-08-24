@@ -482,6 +482,29 @@ is working material.
 One memory per document, rather than one chat covering everything: each entry then carries the
 document it came from, and a fact that turns out to be wrong can be deleted on its own.
 
+#### Pairings, forks, and what the app refuses to remember
+
+Building a memory means the same persona, the same model and the same summariser over and over.
+A **pairing** saves that combination under a name; picking it fills the chat form in one go, and
+the summariser is learned from use, so the one you ran last time is the one offered next. A
+conversation wearing a persona that remembers is marked in the sidebar with the persona's name -
+what is said in one outlives it, so it is worth knowing before you open or delete it.
+
+**Duplicate** on a persona forks it with its memories intact, for running one remembered history
+forward under two models and comparing where they diverge. The copies get fresh ids, so pruning
+one fork leaves the other alone.
+
+Two things the app will not remember for you. A summary saying there was nothing worth keeping
+is refused - it is an answer to the question, not a memory, and stored it becomes an example the
+next summariser copies. And a summary that is near-identical to an existing memory is refused
+with the percentage and date it matches, offering *Save anyway*: that pattern almost always
+means the summariser echoed the reference block instead of reading the conversation.
+
+The model matters more here than anywhere else in the app. A summariser has to follow structured
+rules, ignore a fenced block and write plain facts, which is an instruction-following job rather
+than a coding or reasoning one - a code model will faithfully record your architecture decisions
+and skip everything else you talked about.
+
 The summariser never sees the persona's prompt or its memory inside the transcript - neither is
 a transcript entry - so it cannot fold the memory back into itself. It is shown the memory only
 as a separate reference, for the "write only what is new" instruction.

@@ -439,6 +439,10 @@ details[open] summary { margin-bottom: 9px; }
 .prompt-size { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--se-txt-dim); }
 /* Same two steps the status meter uses, so a projection and a measurement of
    the same conversation do not disagree about what counts as trouble. */
+/* A conversation that feeds a persona's long-term memory. Marked by a glyph
+   as well as a colour, per the suite's rule that state must survive a
+   colour-blind reader. */
+.sess-memory { color: var(--se-active); }
 .prompt-size.near { color: var(--se-warn); }
 .prompt-size.over { color: var(--se-down); font-weight: 600; }
 

@@ -271,7 +271,12 @@ const Settings = {
        * the first question a wrong memory raises. Deleting is unsaved until
        * Save, like everything else on this page.
        */
-      const memories = (p?.memories ?? []).map((m) => ({ entry: m, textEl: el('textarea', { rows: 3 }, m.text) }));
+      // A cloned entry arrives without an id (see the duplicate button) and
+      // gets a fresh one, so forgetting it on one fork leaves the other alone.
+      const memories = (p?.memories ?? []).map((m) => ({
+        entry: { ...m, id: m.id ?? 'mem' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) },
+        textEl: el('textarea', { rows: 3 }, m.text),
+      }));
       const rowObj = { id, els, memories };
       const memWrap = el('div', { class: 'col' });
       const memHeader = el('span', { class: 'muted' });
@@ -335,9 +340,26 @@ const Settings = {
         rows.splice(rows.indexOf(rowObj), 1);
         row.remove();
       } }, '✕');
+      /*
+       * Fork a persona, memories and all. The point is a controlled
+       * comparison: run the same remembered history forward under two
+       * different models and watch where they diverge. Copying the memories
+       * is what makes it a fork rather than a fresh start, and the entries
+       * get new ids so pruning one side leaves the other alone.
+       */
+      const cloneBtn = el('button', { class: 'mini', title: 'Duplicate this persona with its memories (press Save to keep it)', onclick: (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        addRow({
+          name: `${els.name.value.trim() || 'persona'} (copy)`,
+          systemPrompt: els.prompt.value,
+          memories: memories.map((m) => ({ ...m.entry, id: undefined, text: m.textEl.value })),
+        });
+        rowsWrap.lastElementChild.scrollIntoView({ block: 'nearest' });
+      } }, 'duplicate');
 
       const row = el('details', { class: 'persona-row' },
-        el('summary', {}, title, preview, el('span', { class: 'grow' }), delBtn),
+        el('summary', {}, title, preview, el('span', { class: 'grow' }), cloneBtn, delBtn),
         el('div', { class: 'col' },
           el('div', { class: 'row' }, el('label', {}, 'Name'), els.name),
           els.prompt,

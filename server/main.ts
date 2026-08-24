@@ -55,6 +55,7 @@ const defaultPresets: Presets = {
   summarizeTemplate: DEFAULT_SUMMARIZE_TEMPLATE,
   distilTemplate: DEFAULT_DISTIL_TEMPLATE,
   compactTemplate: DEFAULT_COMPACT_TEMPLATE,
+  pairings: [],
   councils: [],
   roundtables: [],
   pipelines: [],
@@ -261,13 +262,14 @@ route('PUT', '/api/personas', async (req, res) => {
  * see engine.saveMemory.
  */
 route('POST', '/api/personas/:id/memories', async (req, res, params) => {
-  const { sessionId, entryId, replace } = await readJsonBody(req);
+  const { sessionId, entryId, replace, force } = await readJsonBody(req);
   const persona = engine.saveMemory(
     userOf(req),
     params.id,
     requireText(sessionId, 'sessionId'),
     requireText(entryId, 'entryId'),
     Boolean(replace),
+    Boolean(force),
   );
   sendJson(res, 200, persona);
 });
@@ -395,6 +397,13 @@ route('GET', '/api/sessions', (req, res) => {
       id: s.id, title: s.title, mode: s.mode,
       createdAt: s.createdAt, updatedAt: s.updatedAt, tags: s.tags,
       status: s.status === 'active' && s.id !== liveId ? 'paused' : s.status,
+      /*
+       * Which persona, if this session wears one, so the sidebar can mark a
+       * conversation that feeds a long-term memory. Those deserve more care
+       * than an ordinary chat - what happens in them outlives them - and the
+       * list was the one place that gave no hint before you opened it.
+       */
+      personaId: (s.config as { personaId?: string })?.personaId,
     }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   sendJson(res, 200, sessions);

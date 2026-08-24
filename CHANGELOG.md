@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+**A persona stopped remembering facts and started remembering the act of
+summarising.** Told to record only what was new and to "say so in one line" if
+nothing was, a summariser wrote "no new information was shared" - and that got
+saved as a memory. The next summariser then found, at the bottom of the
+reference block and immediately before the instruction to write a memory, an
+example of exactly the shape it was being asked for, and copied it. Four
+rounds in, a conversation about sim-racing games produced a summary about
+TFTP, word for word the memory from two conversations earlier.
+
+Four changes close the loop. The templates now forbid writing about the
+conversation, about the task, or about what was or was not new - a memory is
+facts or it is nothing. "Nothing worth remembering" is a **sentinel** the app
+recognises and refuses to store, rather than a sentence that becomes one; the
+summary shows "nothing to remember" where its Remember button would be. The
+already-remembered block is **fenced and labelled reference-only**, so it
+reads less like a template to copy. And a summary that is **near-identical to
+an existing memory** is refused with the percentage and the date it matches,
+offering "Save anyway" - the same failure, caught at the door.
+
+**Personas can be duplicated, memories and all.** For running one remembered
+history forward under two different models and watching where they diverge.
+The copied entries get fresh ids, so pruning one fork leaves the other alone,
+and each keeps the conversation it came from.
+
+**Pairings: a named persona-and-model combination.** Building a memory means
+the same persona, the same model and the same summariser over and over, and
+every one of those was a separate pick on a form. A pairing is that
+combination saved and reused; the summariser is learned from use rather than
+configured, so the one you ran last time is the one offered next. Sessions
+started from a pairing record it.
+
+**The sidebar marks a conversation that feeds a memory** with a glyph and the
+persona's name, because what is said in one outlives it - and the list was the
+one place that gave no hint before you opened it.
+
 **Distilling a document into a memory is its own job, and now has its own
 tools.** Building a persona that knows about your projects meant pasting a
 write-up into a chat, letting the model reply, and summarising the result -

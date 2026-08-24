@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Persona, RoundtableConfig, TranscriptEntry } from '../types.ts';
-import { DEFAULT_COMPACT_TEMPLATE, DEFAULT_DISTIL_TEMPLATE, DEFAULT_SUMMARIZE_TEMPLATE } from '../types.ts';
-import { memoryTokens, renderMemoryLayer, renderMemoryPlain } from '../memory.ts';
+import { DEFAULT_COMPACT_TEMPLATE, DEFAULT_DISTIL_TEMPLATE, DEFAULT_SUMMARIZE_TEMPLATE, NOTHING_NEW } from '../types.ts';
+import { DUPLICATE_OVERLAP, findNearDuplicate, isNothingNew, memoryTokens, overlap, renderMemoryLayer, renderMemoryPlain } from '../memory.ts';
 import { buildChatMessages, buildSystemPrompt } from '../chat.ts';
 import { buildSystemPrompt as buildRoundtablePrompt } from '../roundtable.ts';
 import { fillTemplate, renderSourceText, renderTranscriptText } from '../text.ts';
@@ -115,15 +115,26 @@ test('fillTemplate: every placeholder is filled, and $ in a value stays literal'
   assert.equal(out, "A:costs $5 & more B:it's $& C:costs $5 & more");
 });
 
-test('default templates: the summariser sees the memory and is asked for the delta; the compactor sees only the memory', () => {
+test('default templates: fenced reference block, no meta-commentary, and a sentinel', () => {
+  for (const t of [DEFAULT_SUMMARIZE_TEMPLATE, DEFAULT_DISTIL_TEMPLATE]) {
+    // The memory is fenced and labelled reference-only. Unfenced, it sat at
+    // the bottom of the prompt looking exactly like the answer being asked
+    // for, and models copied it.
+    assert.ok(t.includes('{{MEMORY}}'));
+    assert.match(t, /ALREADY REMEMBERED/);
+    assert.match(t, /END ALREADY REMEMBERED/);
+    assert.match(t, /reference only/i);
+    // The bug this template caused: "no new information was shared" written as
+    // CONTENT, saved as a memory, then copied by the next summariser.
+    assert.match(t, /what was or was not new/i);
+    // A sentinel, not a sentence, so the app can recognise and refuse it.
+    assert.ok(t.includes(NOTHING_NEW));
+  }
   assert.ok(DEFAULT_SUMMARIZE_TEMPLATE.includes('{{TRANSCRIPT}}'));
-  assert.ok(DEFAULT_SUMMARIZE_TEMPLATE.includes('{{MEMORY}}'));
-  assert.match(DEFAULT_SUMMARIZE_TEMPLATE, /only what is NEW/);
   assert.ok(DEFAULT_COMPACT_TEMPLATE.includes('{{MEMORY}}'));
   assert.ok(!DEFAULT_COMPACT_TEMPLATE.includes('{{TRANSCRIPT}}'));
   assert.match(DEFAULT_COMPACT_TEMPLATE, /shorter than the input/i);
 });
-
 test('source rendering: the material only, with every model reply left out', () => {
   // The whole point of {{SOURCE}}: a conversation ABOUT a document is not the
   // document, and a distillation prompt handed the assistant's clarifying
@@ -154,10 +165,61 @@ test('source rendering: narrator injections count, because a person typed them',
 
 test('default templates: the distillation reads SOURCE and is about the subject', () => {
   assert.ok(DEFAULT_DISTIL_TEMPLATE.includes('{{SOURCE}}'));
-  assert.ok(DEFAULT_DISTIL_TEMPLATE.includes('{{MEMORY}}'));
   // It must not be handed the whole exchange - that is the other template.
   assert.ok(!DEFAULT_DISTIL_TEMPLATE.includes('{{TRANSCRIPT}}'));
   assert.match(DEFAULT_DISTIL_TEMPLATE, /SUBJECT/);
-  // And it should say not to write about the material as a document.
-  assert.match(DEFAULT_DISTIL_TEMPLATE, /not describe the material as a document/i);
+  assert.match(DEFAULT_DISTIL_TEMPLATE, /as a document/i);
+});
+test('nothing-new: the sentinel is recognised, a real memory is not', () => {
+  assert.equal(isNothingNew('NOTHING NEW'), true);
+  assert.equal(isNothingNew('NOTHING NEW.'), true);
+  assert.equal(isNothingNew('nothing new'), true);
+  // Models rarely answer with a bare token; a short apologetic wrapper counts.
+  assert.equal(isNothingNew('NOTHING NEW - the conversation added no facts.'), true);
+  // But a real memory that happens to use the words does not, because it is
+  // long enough to be carrying content.
+  assert.equal(isNothingNew(
+    'The user runs a 3090 and prefers Q4_K_M quants. They decided nothing new would be '
+    + 'added to the RSOperator fork until persona memory has been tested properly, and they '
+    + 'are running the comparison with two forks of the same persona.'), false);
+  assert.equal(isNothingNew(''), false);
+});
+
+test('near-duplicate: an echoed memory scores high, an unrelated one does not', () => {
+  // The real failure: a summariser handed the memory block wrote a summary of
+  // the last memory instead of the conversation.
+  const memory = 'The user is testing TFTP functionality on Ubuntu and is open to using tftp-hpa '
+    + 'for more reliable and debuggable TFTP operations. The user is interested in TFTP client '
+    + 'options for network device or embedded system testing.';
+  const echoed = 'The user is testing TFTP functionality on Ubuntu and is open to using tftp-hpa '
+    + 'for reliable debuggable TFTP operations. The user is interested in TFTP client options '
+    + 'for network device or embedded system testing. No new facts were introduced.';
+  const genuine = 'The user runs multiple sim-racing setups with Logitech G923 wheels on Windows '
+    + '11 and bought Crashday Redline Edition, looking for inexpensive networked multiplayer '
+    + 'racing games with wheel support and computer opponents.';
+  assert.ok(overlap(echoed, memory) >= DUPLICATE_OVERLAP, String(overlap(echoed, memory)));
+  assert.ok(overlap(genuine, memory) < 0.3, String(overlap(genuine, memory)));
+
+  const persona = { memories: [
+    { id: 'a', at: '2026-08-24T00:00:00Z', text: 'The user runs MobaXTerm on Windows.' },
+    { id: 'b', at: '2026-08-24T04:00:00Z', text: memory },
+  ] };
+  assert.equal(findNearDuplicate(persona, echoed)?.entry.id, 'b');
+  assert.equal(findNearDuplicate(persona, genuine), null);
+});
+
+test('near-duplicate: a one-line memory is not "contained" in every longer one', () => {
+  /*
+   * Caught by the test above before it shipped. Containment against a very
+   * short memory is carried entirely by phrasing: an unrelated memory about
+   * sim racing scored 0.80 against "The user runs MobaXTerm on Windows",
+   * purely on "the user runs windows" - which would have refused a genuine
+   * new memory as a duplicate.
+   */
+  const short = 'The user runs MobaXTerm on Windows.';
+  const unrelated = 'The user runs multiple sim-racing setups with Logitech G923 wheels on Windows '
+    + '11 and bought Crashday Redline Edition, looking for inexpensive networked multiplayer '
+    + 'racing games with wheel support and computer opponents.';
+  assert.equal(overlap(unrelated, short), 0, 'too short to judge, so it does not judge');
+  assert.equal(findNearDuplicate({ memories: [{ id: 'a', at: '2026-08-24T00:00:00Z', text: short }] }, unrelated), null);
 });

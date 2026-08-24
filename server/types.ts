@@ -153,6 +153,13 @@ export interface ChatConfig {
   systemPrompt?: string; // free text, layered after the persona
   params?: GenParams;
   /*
+   * The pairing this chat was started from, if any. Recorded so the summarise
+   * fold can default to the same summariser every time - a memory-building
+   * chat is the case where you use one combination over and over, and picking
+   * the model again on every one is the friction.
+   */
+  pairingId?: string;
+  /*
    * Set on a session created to compact a persona's memory. The session
    * deliberately has no personaId - the memories are its user turn, and
    * layering them into the system prompt as well would hand the compactor
@@ -230,6 +237,28 @@ export interface Presets {
   summarizeTemplate?: string; // chat -> persona memory, {{TRANSCRIPT}} and {{MEMORY}}
   distilTemplate?: string; // reference material -> persona memory, {{SOURCE}} and {{MEMORY}}
   compactTemplate?: string; // many memories -> one, {{MEMORY}}
+  /*
+   * A remembered persona-and-model combination.
+   *
+   * Building a persona's memory means the same persona, the same model and
+   * the same summariser, over and over - and every one of those was a
+   * separate pick on a form each time. A pairing is that combination named
+   * and reusable. It is deliberately a preset rather than a fifth session
+   * mode: everything that differs is which fields the form starts with and
+   * how the session is labelled, and neither needs its own state machine.
+   *
+   * `summarizer` is written back whenever a summary runs in a session started
+   * from the pairing, so the last one used becomes the next one offered.
+   */
+  pairings?: Array<{
+    id: string;
+    name: string;
+    personaId?: string;
+    endpointId: string;
+    model: string;
+    params?: GenParams;
+    summarizer?: { endpointId: string; model: string; params?: GenParams };
+  }>;
   councils: Array<{ id: string; name: string; config: CouncilConfig }>;
   roundtables: Array<{ id: string; name: string; config: RoundtableConfig }>;
   pipelines?: Array<{ id: string; name: string; stages: PipelineStage[] }>;
@@ -336,6 +365,19 @@ Summarize the discussion: the strongest points made by each participant,
 where they agreed and disagreed, and your overall verdict or synthesis.`;
 
 /*
+ * What a summariser says when a conversation was not worth remembering.
+ *
+ * A sentinel rather than a sentence, because the sentence became the bug: told
+ * to "say so in one line" if nothing was new, models wrote "no new information
+ * was shared" - and that got SAVED as a memory. The next summariser then found
+ * a memory shaped exactly like the answer it was being asked for, sitting at
+ * the bottom of the reference block, and copied it. Three rounds in, the
+ * meta-commentary had crowded out the facts. A fixed token is something the
+ * app can recognise and refuse to store.
+ */
+export const NOTHING_NEW = 'NOTHING NEW';
+
+/*
  * Chat -> memory. The summariser is shown what the persona ALREADY remembers
  * and asked for the delta. Without that, every summary of a long-running
  * relationship converges on the same five bullets, and a model that echoed a
@@ -343,13 +385,21 @@ where they agreed and disagreed, and your overall verdict or synthesis.`;
  */
 export const DEFAULT_SUMMARIZE_TEMPLATE = `You are writing a memory for an assistant persona, distilled from one conversation it just had.
 
-What the persona already remembers from earlier conversations:
+=== ALREADY REMEMBERED - reference only. Do not copy from this block, do not summarise it, do not mention it. ===
 {{MEMORY}}
+=== END ALREADY REMEMBERED ===
 
-The conversation:
+=== THE CONVERSATION - this is the only thing you are summarising ===
 {{TRANSCRIPT}}
+=== END THE CONVERSATION ===
 
-Write the memory as short plain prose or bullets, referring to the other party as "the user". Record only what is NEW: decisions made, preferences stated, facts about the user or their projects, and threads left open. Do not repeat anything already remembered, even where the conversation itself echoed it back - a remembered fact restated by the assistant is not new. Leave out pleasantries and anything a model would know without this conversation. If the conversation added nothing worth keeping, say so in one line.`;
+Write what this conversation revealed about the user and their work: decisions made, preferences stated, facts about them or their projects, and threads left open. Refer to them as "the user". Short plain prose or bullets.
+
+Rules:
+- Write facts only. Never write about the conversation itself, about what was or was not new, or about the task you were given. A line like "no new information was shared" is not a memory and must not appear in your answer.
+- Do not repeat anything in the ALREADY REMEMBERED block, including anything the assistant restated during the conversation.
+- Leave out pleasantries and anything a model would know without this conversation.
+- If this conversation revealed nothing worth remembering, reply with exactly: ${NOTHING_NEW}`;
 
 /*
  * Reference material -> memory. A different job from summarising a
@@ -364,13 +414,20 @@ Write the memory as short plain prose or bullets, referring to the other party a
  */
 export const DEFAULT_DISTIL_TEMPLATE = `You are writing a reference memory for an assistant persona: a durable, compact account of the material below, which the persona should carry into later conversations.
 
-What the persona already remembers:
+=== ALREADY REMEMBERED - reference only. Do not copy from this block, do not summarise it, do not mention it. ===
 {{MEMORY}}
+=== END ALREADY REMEMBERED ===
 
-The material:
+=== THE MATERIAL - this is the only thing you are distilling ===
 {{SOURCE}}
+=== END THE MATERIAL ===
 
-Write what is worth remembering about the SUBJECT of this material: what it is, what it does, the decisions and constraints that shape it, and how it relates to anything already remembered. Prefer specifics that would be hard to reconstruct - names, numbers, deliberate non-goals - over generalities. Do not describe the material as a document ("this text explains...") and do not mention that it was provided. Do not repeat anything already remembered. If it adds nothing, say so in one line.`;
+Write what is worth remembering about the SUBJECT of this material: what it is, what it does, and the decisions and constraints that shape it. Prefer specifics that would be hard to reconstruct - names, numbers, deliberate non-goals - over generalities.
+
+Rules:
+- Write facts only. Never write about the material as a document ("this text explains..."), never mention that it was provided, and never write about what was or was not new.
+- Do not repeat anything in the ALREADY REMEMBERED block.
+- If the material adds nothing worth remembering, reply with exactly: ${NOTHING_NEW}`;
 
 /*
  * Many memories -> one. Lossy by nature, which is why it is a button and not

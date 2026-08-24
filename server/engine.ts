@@ -869,6 +869,7 @@ export function saveMemory(
   sessionId: string,
   entryId: string,
   replace: boolean,
+  force = false,
 ): Persona {
   const session = peekSession(username, sessionId);
   const entry = session.entries.find((e) => e.id === entryId);
@@ -895,6 +896,31 @@ export function saveMemory(
   const personas = getPersonas(username);
   const persona = personas.find((p) => p.id === personaId);
   if (!persona) throw new InputError('persona not found', 404);
+  /*
+   * A summariser saying "there was nothing new here" is answering the
+   * question, not producing a memory. Stored, it became an example of what a
+   * memory looks like for the NEXT summariser to copy - which is how a
+   * persona ended up remembering four rounds of commentary about
+   * summarising and one fact.
+   */
+  if (mem.isNothingNew(text)) {
+    throw new InputError('that summary says there was nothing worth remembering, so there is nothing to save');
+  }
+  /*
+   * Near-identical to something already remembered. Almost always the same
+   * failure - a model handed the memory block and echoing it back rather than
+   * reading the conversation - so it is worth a question rather than a silent
+   * duplicate. 409 so the client can offer to save anyway.
+   */
+  if (!force && !replace) {
+    const dupe = mem.findNearDuplicate(persona, text);
+    if (dupe) {
+      throw new InputError(
+        `this is ${Math.round(dupe.score * 100)}% the same as a memory from ${dupe.entry.at.slice(0, 10)} - the summariser may have echoed it instead of reading the conversation`,
+        409,
+      );
+    }
+  }
   const m: MemoryEntry = {
     id: store.newId(),
     at: new Date().toISOString(),

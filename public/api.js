@@ -14,7 +14,11 @@ const Api = {
           !url.startsWith('/api/password') && typeof Auth !== 'undefined') {
         Auth.show(false);
       }
-      throw new Error(data.error || `HTTP ${res.status}`);
+      // The status rides along: a caller that can offer a way past a refusal
+      // (409 near-duplicate memory, say) needs to tell it from a real failure.
+      const err = new Error(data.error || `HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
     }
     return data;
   },
@@ -93,8 +97,8 @@ const Api = {
   chatSummarize: (sessionId, endpointId, model, template, params) =>
     Api._post('/api/chat/summarize', { sessionId, endpointId, model, template, params }),
   chatSystemPrompt: (config) => Api._post('/api/chat/system-prompt', config),
-  saveMemory: (personaId, sessionId, entryId, replace) =>
-    Api._post(`/api/personas/${encodeURIComponent(personaId)}/memories`, { sessionId, entryId, replace }),
+  saveMemory: (personaId, sessionId, entryId, replace, force) =>
+    Api._post(`/api/personas/${encodeURIComponent(personaId)}/memories`, { sessionId, entryId, replace, force }),
   compactMemory: (personaId, endpointId, model, template, params) =>
     Api._post(`/api/personas/${encodeURIComponent(personaId)}/compact`, { endpointId, model, template, params }),
 
