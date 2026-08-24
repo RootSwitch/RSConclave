@@ -123,7 +123,16 @@ const Chat = {
     const syncCtx = ollamaOnly(ctxField, endpoint);
     const maxOut = maxTokensInput();
     const errEl = el('div', { class: 'error-text' });
-    this.setup = { endpoint, model, persona, system, message, temp, ctx, maxOut, errEl };
+    /*
+     * The first message is where a pasted document meets a model window, and
+     * until now nothing said whether the two were compatible - the same gap
+     * the council setup had. One seat instead of several, so it is a single
+     * marker rather than a list, but the arithmetic is the app's job either
+     * way. Counts the system prompt too, since that is sent with every turn.
+     */
+    const sizeEl = el('span', { class: 'prompt-size' });
+    const fitEl = el('span', { class: 'fit-tag' });
+    this.setup = { endpoint, model, persona, system, message, temp, ctx, maxOut, errEl, sizeEl, fitEl };
 
     for (const ep of App.config.endpoints) endpoint.append(el('option', { value: ep.id }, ep.name));
     syncCtx(); // options exist now, so the kind is finally knowable
@@ -160,13 +169,31 @@ const Chat = {
       ),
       el('label', {}, 'Message'),
       message,
+      el('div', { class: 'row' }, sizeEl, fitEl),
       el('div', { class: 'row' },
         el('button', { class: 'primary', onclick: () => this.start() }, 'Start Chat'),
         errEl,
       ),
     );
+    // The persona's memory is a layer this form does not build, so its size is
+    // not knowable here - a persona with a long memory shifts the number, and
+    // saying so beats quietly being wrong about it.
+    for (const node of [message, system, ctx]) node.addEventListener('input', () => this.refreshSetupFit());
+    for (const node of [model, persona, endpoint]) node.addEventListener('change', () => this.refreshSetupFit());
     setTimeout(() => message.focus(), 0);
     return band;
+  },
+
+  /** Does the first message fit the model picked for it? See buildSetup. */
+  refreshSetupFit() {
+    const s = this.setup;
+    if (!s || !s.sizeEl.isConnected) return;
+    const needed = estimateTokens(s.message.value) + estimateTokens(s.system.value);
+    s.sizeEl.textContent = needed ? `about ${fmtK(needed)} tokens` : '';
+    s.sizeEl.title = needed
+      ? 'Message plus system prompt, roughly, at four characters per token. A persona with memories adds more that this form cannot see.'
+      : '';
+    renderFitTag(s.fitEl, fitVerdict(needed, App.modelInfo(s.endpoint.value, s.model.value), s.ctx.value));
   },
 
   /** Clone entry point: the model list must load before its value can be set. */
@@ -344,6 +371,40 @@ const Chat = {
     };
     onEnterSend(box, send);
 
+    /*
+     * What this message would cost, before it is irreversible. Quiet unless
+     * there is something to say: a one-line reply needs no commentary, and a
+     * readout that is always there stops being read. The sidebar meter still
+     * reports the turn already sent - this one is about the turn you are
+     * about to send.
+     */
+    const draftSizeEl = el('span', { class: 'prompt-size' });
+    const syncDraft = () => {
+      const p = chatTurnProjection(session, box.value);
+      const draft = estimateTokens(box.value);
+      if (!p) {
+        // No measured turn to build on. The draft's own size is still worth
+        // saying once it is big enough to be a surprise.
+        draftSizeEl.className = 'prompt-size';
+        draftSizeEl.textContent = draft >= 500 ? `this message: about ${fmtK(draft)} tokens` : '';
+        draftSizeEl.title = draft >= 500 ? 'Rough estimate at four characters per token.' : '';
+        return;
+      }
+      const notable = draft >= 500 || p.pct >= 90;
+      draftSizeEl.className = `prompt-size${p.pct > 100 ? ' over' : p.pct >= 90 ? ' near' : ''}`;
+      draftSizeEl.textContent = notable
+        ? `next turn: about ${fmtK(p.total)} of ${fmtK(p.window)} ctx (${p.pct}%)`
+        : '';
+      draftSizeEl.title = notable
+        ? `This message is about ${fmtK(p.draft)} tokens on top of the conversation so far.`
+          + (p.pct > 100
+            ? ' Over the window: Ollama will silently drop the oldest turns, which is where the system prompt lives.'
+            : ' Rough estimate at four characters per token, so treat it as a floor.')
+        : '';
+    };
+    box.addEventListener('input', syncDraft);
+    syncDraft();
+
     const hasReply = session.entries.some((e) => e.kind !== 'user');
     // A turn that failed before its reply entry existed leaves the transcript
     // ending on the question. Without a button for it the only way on was to
@@ -356,6 +417,7 @@ const Chat = {
       el('div', { class: 'row' }, box),
       el('div', { class: 'row' },
         el('button', { class: 'primary', onclick: send }, 'Send ▸'),
+        draftSizeEl,
         unanswered
           ? el('button', {
               title: 'That message never got a reply. Ask again without retyping it.',
@@ -376,3 +438,10 @@ const Chat = {
     focusIfIdle(box);
   },
 };
+
+/*
+ * Once, at module scope. /api/show lands after the form is drawn, and a
+ * listener registered inside buildSetup would leave a stale call behind for
+ * every chat set up in a session - the same trap the council checklist had.
+ */
+document.addEventListener('model-info-loaded', () => Chat.refreshSetupFit());

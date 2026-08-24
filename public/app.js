@@ -162,6 +162,16 @@ const REPLY_HEADROOM_TOKENS = 1024;
  */
 const ASSUMED_REPLY_TOKENS = 1024;
 
+/*
+ * The roundtable's framing preamble - who you are, who else is here, how
+ * other turns are labelled, do not speak for anyone else. Built server-side
+ * in roundtable.ts buildSystemPrompt and roughly fixed in length, so a
+ * constant is closer to the truth than leaving it out of a seat's standing
+ * cost entirely. Generous on purpose: under-reporting overhead is the failure
+ * that matters.
+ */
+const ROUNDTABLE_FRAMING_TOKENS = 90;
+
 /**
  * Can this seat take a prompt of `needed` tokens? Three answers, because a
  * model has three different ceilings:
@@ -189,6 +199,44 @@ function fitVerdict(needed, info, overrideCtx) {
   return { kind: trained && want > trained ? 'over' : 'raise', want, window, trained, baked };
 }
 
+/*
+ * Reasoning does not ride into the next turn, so it must not be counted
+ * towards one. Mirrors stripThink in server/text.ts - an unclosed block runs
+ * to the end, which is what a cut-off reasoning model leaves behind.
+ */
+function stripThinkText(text) {
+  return (text ?? '').replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '');
+}
+
+/**
+ * What the NEXT turn of a chat would cost, with a draft added to it.
+ *
+ * The status meter measures the turn already sent, which answers the question
+ * one turn too late: paste a document into an 85%-full conversation and the
+ * meter reports 140% afterwards, by which point Ollama has already truncated
+ * from the front and taken the system prompt with it.
+ *
+ * Anchored on the server's own measurement of the last turn rather than
+ * rebuilt here, so the history half is not a second implementation of
+ * buildChatMessages that can drift from it. Only the delta is estimated: the
+ * reply that arrived after that measurement, plus the draft. Returns null
+ * when there is no measurement to build on - a chat with no turns yet is the
+ * setup form's business, not this one.
+ */
+function chatTurnProjection(session, draftText) {
+  const st = App.runState;
+  if (!App.isActiveSession() || st.contextTokens === undefined || !st.contextWindow) return null;
+  const draft = estimateTokens(draftText);
+  // The last turn's measurement covers everything up to and including your
+  // message; the answer it produced is carried by the NEXT turn, not that one.
+  const last = session.entries.at(-1);
+  const replySince = last && last.kind !== 'user' && !last.error && last.kind !== 'consolidation'
+    ? estimateTokens(stripThinkText(last.text))
+    : 0;
+  const total = st.contextTokens + replySince + draft;
+  return { draft, total, window: st.contextWindow, pct: Math.round((total / st.contextWindow) * 100) };
+}
+
 /** Fill a span with a seat's fit warning, or empty it when there is none. */
 function renderFitTag(span, verdict) {
   if (!verdict) {
@@ -200,14 +248,17 @@ function renderFitTag(span, verdict) {
   span.className = `fit-tag ${verdict.kind}`;
   if (verdict.kind === 'over') {
     span.textContent = `over its ${fmtK(verdict.trained)} limit`;
-    span.title = `This prompt needs about ${fmtK(verdict.want)} tokens including room to reply, but this model was trained for ${fmtK(verdict.trained)}. No num_ctx setting fixes that - Ollama would truncate the prompt from the front, which is where a system prompt lives.`;
+    span.title = `The text this seat is given needs about ${fmtK(verdict.want)} tokens including room to reply, but this model was trained for ${fmtK(verdict.trained)}. No num_ctx setting fixes that - Ollama would truncate from the front, which is where a system prompt lives.`;
     return;
   }
   span.textContent = `needs ~${fmtK(verdict.want)}`;
   const spill = verdict.want > verdict.baked
     ? ` Above its Modelfile default of ${fmtK(verdict.baked)} it may stop fitting in VRAM and spill into system RAM.`
     : '';
-  span.title = `This seat is set to ${fmtK(verdict.window)}; the prompt needs about ${fmtK(verdict.want)} including room to reply. Raise this row's ctx, or use Fit this prompt.${spill}`;
+  // No button named here: this tag is shared by the council checklist, the
+  // chat setup form and the roundtable seats, and only one of those has a Fit
+  // this prompt button to point at.
+  span.title = `This seat is set to ${fmtK(verdict.window)}; the text it is given needs about ${fmtK(verdict.want)} including room to reply. Raise this seat's ctx to at least that.${spill}`;
 }
 
 function fmtK(n) {

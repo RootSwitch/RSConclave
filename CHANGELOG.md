@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+**Chat and roundtable get the same sizing the council does.** The council
+markers answered "will this paste fit" only where a council was being
+assembled - the same paste into a chat, which is where a document more often
+lands, still went in blind.
+
+A chat's compose box now projects the turn you are about to send: `next turn:
+about 21k of 4k ctx (528%)`, red past the window, with the reason in the
+hover. The status meter already reported this, one turn too late - it measures
+what was sent, so pasting a document into an 85%-full conversation showed 140%
+afterwards, by which point the oldest turns were already gone. Quiet for an
+ordinary message: a one-line reply needs no commentary. The chat setup form
+marks its first message against the model picked for it, exactly as the
+council checklist does.
+
+A roundtable seat is marked against its **standing cost** - the framing, the
+persona, that persona's memories, the seat overlay and the scenario - which it
+pays on every turn before a word of conversation exists, and which nothing
+reported until the first turn ran. The scenario says what it costs, and that
+it is charged to every seat on every turn.
+
 **A council says whether the prompt fits before you run it.** Pasting a long
 document into a council was a guess: the model list showed each seat's window,
 but nothing said how big the prompt was, so the only way to find out was to

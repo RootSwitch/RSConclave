@@ -185,6 +185,7 @@ const Roundtable = {
       placeholder: 'The situation every participant is given: what is being decided, argued or played out, and anything they all already know…',
     });
     this.keepLastEl = el('input', { type: 'number', min: '0', placeholder: 'all' });
+    this.scenarioEl.addEventListener('input', () => this.refreshFit());
     this.errEl = el('div', { class: 'error-text' });
     const rowsWrap = el('div', { class: 'col' });
     this.rowsWrap = rowsWrap;
@@ -209,6 +210,7 @@ const Roundtable = {
       el('button', { onclick: () => this.addPartRow(rowsWrap) }, '+ add participant'),
       el('label', {}, 'Scenario'),
       this.scenarioEl,
+      el('div', { class: 'row' }, (this.sizeEl = el('span', { class: 'prompt-size' }))),
       this.buildPromptDisclosure(),
       /*
        * Collapsed by default so it costs nothing on a phone, where the setup
@@ -328,10 +330,50 @@ const Roundtable = {
       row.remove();
     } }, '✕');
 
+    /*
+     * Whether this seat can hold what it is about to be given, before anyone
+     * speaks. A roundtable seat carries more permanent overhead than any other
+     * in the app - framing, persona, that persona's memories, the overlay and
+     * the scenario - and it pays that on EVERY turn, with the transcript
+     * growing on top. A seat that cannot hold the standing overhead is broken
+     * before turn one, and nothing said so until it ran.
+     */
+    els.fit = el('span', { class: 'fit-tag' });
+    for (const node of [els.ctx, els.overlay]) node.addEventListener('input', () => this.refreshFit());
+    for (const node of [els.endpoint, els.model, els.persona]) node.addEventListener('change', () => this.refreshFit());
+
     const row = el('div', { class: 'participant-row' },
-      els.color, els.name, els.endpoint, els.model, els.persona, els.temp, els.ctx, els.maxOut, removeBtn, els.overlay);
+      els.color, els.name, els.endpoint, els.model, els.persona, els.temp, els.ctx, els.maxOut, removeBtn, els.overlay, els.fit);
     rowsWrap.append(row);
     this.parts.push({ id, els });
+    this.refreshFit();
+  },
+
+  /*
+   * The standing cost of each seat: everything sent on every turn before a
+   * word of conversation exists. Estimated from the parts the client already
+   * holds rather than fetched from /api/roundtable/system-prompts, which is a
+   * round trip and would need one per keystroke; the framing preamble it
+   * cannot see is a fixed sentence or two, which the constant covers.
+   */
+  refreshFit() {
+    if (!this.scenarioEl?.isConnected) return;
+    const scenario = estimateTokens(this.scenarioEl.value);
+    if (this.sizeEl) {
+      this.sizeEl.textContent = scenario ? `scenario: about ${fmtK(scenario)} tokens, sent to every seat on every turn` : '';
+      this.sizeEl.title = scenario
+        ? 'Rough estimate at four characters per token. Each seat also carries the framing preamble, its persona and memories, and its own overlay - and the conversation grows on top of all of it.'
+        : '';
+    }
+    for (const p of this.parts) {
+      const els = p.els;
+      if (els.endpoint.value === '__human') { renderFitTag(els.fit, null); continue; }
+      const persona = App.personas.find((x) => x.id === els.persona.value);
+      const memory = (persona?.memories ?? []).reduce((n, m) => n + estimateTokens(m.text) + 14, 0);
+      const standing = ROUNDTABLE_FRAMING_TOKENS + scenario + estimateTokens(els.overlay.value)
+        + estimateTokens(persona?.systemPrompt ?? '') + memory;
+      renderFitTag(els.fit, fitVerdict(standing, App.modelInfo(els.endpoint.value, els.model.value), els.ctx.value));
+    }
   },
 
   /** Clone entry point. Rows fill their own model lists, so no waiting needed. */
@@ -343,6 +385,7 @@ const Roundtable = {
     this.parts = [];
     rowsWrap.replaceChildren();
     for (const p of config.participants) this.addPartRow(rowsWrap, p);
+    this.refreshFit(); // a preset changes every seat and fires no input event
     this.scenarioEl.value = config.scenario ?? '';
     this.keepLastEl.value = config.keepLastTurns ?? '';
     if (this.unloadEl) this.unloadEl.checked = !!config.unloadBetweenTurns;

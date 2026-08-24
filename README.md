@@ -58,7 +58,7 @@ and every transcript **exports** as markdown.
   The prompt box estimates its own size as you type, and any seat too small for it is marked -
   amber when a bigger `num_ctx` on that row would fix it, red when the prompt is past what the
   model was trained for. **Fit this prompt** raises every checked seat at once, capped at each
-  model's trained maximum. See [Right-sizing a council](#right-sizing-a-council).
+  model's trained maximum. See [Right-sizing before you send](#right-sizing-before-you-send).
   The same model can sit on the council more than once (the + on a model row) at different
   temperatures - self-consistency for free. After the synthesis, ask a **follow-up round**:
   every member answers the new question with its own previous answer as context. Give it a
@@ -163,11 +163,19 @@ the 4k server default. The status-strip meter measures each turn's actual prompt
 window by setting `num_ctx` per participant or member (next to the temperature field), in the
 Modelfile, or with `OLLAMA_CONTEXT_LENGTH` on the server. Bigger windows cost VRAM.
 
-### Right-sizing a council
+### Right-sizing before you send
 
-The meter above measures a turn that has already been sent. A council setup answers the
-question before you spend a run on it: paste a long document into the prompt box and it reports
-its own size ("about 21k tokens"), then marks every seat that cannot take it.
+The meter above measures a turn that has already been sent, which answers the question one turn
+too late: paste a document into an 85%-full conversation and it reports 140% afterwards, once
+the oldest turns are already gone. So every place a large paste meets a model window says
+something first.
+
+**Council** reports the prompt's size ("about 21k tokens") and marks every seat that cannot take
+it. **Chat** marks its first message against the model picked for it, and its compose box
+projects the next turn (`next turn: about 21k of 4k ctx (528%)`) while you type - quiet for an
+ordinary message. **Roundtable** marks each seat against its *standing cost*: the framing, the
+persona, that persona's memories, the seat overlay and the scenario, all of which are sent on
+every turn before any conversation exists.
 
 The two markers have two different remedies, which is why they are not one:
 
@@ -176,7 +184,7 @@ The two markers have two different remedies, which is why they are not one:
 | amber `needs ~22k` | the seat's window is too small **as set** | raise that row's `num_ctx`, or press Fit this prompt |
 | red `over its 8k limit` | past what the model was **trained** for | none - pick a different model |
 
-**Fit this prompt** raises every checked seat to a window that clears the estimate, capped at
+In a council, **Fit this prompt** raises every checked seat to a window that clears the estimate, capped at
 each model's trained maximum, and names the seats it could not help. It only ever raises: a
 seat already big enough is left alone, because its number may have been measured with
 `measure-ctx.sh` and replacing that with a computed one would throw the measurement away.

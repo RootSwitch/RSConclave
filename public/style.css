@@ -437,6 +437,10 @@ details[open] summary { margin-bottom: 9px; }
 .fit-tag.raise { color: var(--se-warn); }
 .fit-tag.over { color: var(--se-down); }
 .prompt-size { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--se-txt-dim); }
+/* Same two steps the status meter uses, so a projection and a measurement of
+   the same conversation do not disagree about what counts as trouble. */
+.prompt-size.near { color: var(--se-warn); }
+.prompt-size.over { color: var(--se-down); font-weight: 600; }
 
 /* ===== Roundtable ===== */
 .participant-row, .stage-row {
