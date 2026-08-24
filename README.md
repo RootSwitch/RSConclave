@@ -448,8 +448,9 @@ and attached by you. Nothing is remembered automatically.
 1. In a chat, open **Summarise this conversation** and run it. The summariser is handed the
    transcript and whatever the persona already remembers, and asked to write only what is new.
    Its output lands in the chat as a summary you read first.
-2. Press **Remember** on the summary and pick the persona. Any consolidation can be saved this
-   way - a council's synthesis and a roundtable verdict too, not only chat summaries.
+2. Press **Remember** on the summary and pick the persona, then **Append** or **Erase &
+   replace**. Any consolidation can be saved this way - a council's synthesis and a roundtable
+   verdict too, not only chat summaries.
 3. Start a new chat, or seat a roundtable participant, with that persona. The memories go in
    after the persona's own prompt, framed as things it remembers rather than as instructions,
    and the **System prompt** fold on the session shows exactly what was sent.
@@ -458,9 +459,28 @@ Settings lists every memory a persona holds with the date, the model that wrote 
 conversation it came from; each is editable and deletable, and the block says roughly how many
 tokens the memories add to every turn. When the list grows past what your smallest model's
 window can carry, **Compact** runs a model over the memories and opens the result as its own
-session - save it with "replace existing" and the list becomes one entry. Summaries of summaries
+session - save it with "Erase & replace" and the list becomes one entry. Summaries of summaries
 lose resolution, which is why compaction is a button you press after reading the result, not a
 policy. The original conversations are untouched throughout; a memory is only ever a copy.
+
+#### Teaching a persona from documents
+
+Distilling reference material is a different job from summarising a conversation, so the
+summarise fold picks between them. **Conversation** reads `{{TRANSCRIPT}}` and writes about the
+exchange. **Reference material** reads `{{SOURCE}}` - your messages only, with every model reply
+left out - and writes about the subject. That distinction matters more than it sounds: paste a
+design document into a chat, let the model reply with a few clarifying questions, and a
+conversation-shaped summary records the questions as though they were facts about your project.
+Editing either template saves it, so a prompt tuned for your own documents is written once.
+
+For material with no conversation at all, use a **one-stage pipeline**: the document is the
+input, your distillation prompt is the stage template, and the output carries a **Remember**
+button like any summary. Pipeline setups save as named presets, so "distil an app write-up"
+becomes a tool you reuse. Only a pipeline's *final* stage can be saved - an intermediate output
+is working material.
+
+One memory per document, rather than one chat covering everything: each entry then carries the
+document it came from, and a fact that turns out to be wrong can be deleted on its own.
 
 The summariser never sees the persona's prompt or its memory inside the transcript - neither is
 a transcript entry - so it cannot fold the memory back into itself. It is shown the memory only

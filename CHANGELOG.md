@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+**Distilling a document into a memory is its own job, and now has its own
+tools.** Building a persona that knows about your projects meant pasting a
+write-up into a chat, letting the model reply, and summarising the result -
+which put the model's own reaction into the memory. Its clarifying questions
+and its "would you like me to..." came back out as though they were facts
+about the subject, and compounded with every document added.
+
+Three changes. The summarise fold picks between **Conversation** and
+**Reference material**: one is about the exchange, the other about the
+subject, and the wrong one writes a memory describing a document being shown
+rather than what it said. The reference template reads a new **`{{SOURCE}}`**
+placeholder - your turns only, with every model reply left out - so the noise
+is structurally absent rather than something the prompt has to argue with,
+the same reason a persona's memory is not in its own transcript. And an
+edited template is now **saved** when you click away from it: these are the
+kind you tune once and want every time, and retyping a distillation prompt
+for the eighth document was the real friction. The roundtable judge's
+template persists the same way.
+
+**A pipeline's final output can be saved as a memory.** It is the cleanest
+route to one there is: a document in, your own template, a distillation out,
+and no conversation whose questions end up in the result - and a pipeline
+setup saves as a named preset, so the prompt is written once and reused. Only
+the last stage; an intermediate output is working material, not the product,
+and a chat reply is still a turn rather than a distillation.
+
 **Chat and roundtable get the same sizing the council does.** The council
 markers answered "will this paste fit" only where a council was being
 assembled - the same paste into a chat, which is where a document more often

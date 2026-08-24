@@ -228,6 +228,7 @@ export interface Presets {
   consolidatorTemplate: string;
   judgeTemplate?: string; // roundtable consolidation/judging, {{TRANSCRIPT}} placeholder
   summarizeTemplate?: string; // chat -> persona memory, {{TRANSCRIPT}} and {{MEMORY}}
+  distilTemplate?: string; // reference material -> persona memory, {{SOURCE}} and {{MEMORY}}
   compactTemplate?: string; // many memories -> one, {{MEMORY}}
   councils: Array<{ id: string; name: string; config: CouncilConfig }>;
   roundtables: Array<{ id: string; name: string; config: RoundtableConfig }>;
@@ -349,6 +350,27 @@ The conversation:
 {{TRANSCRIPT}}
 
 Write the memory as short plain prose or bullets, referring to the other party as "the user". Record only what is NEW: decisions made, preferences stated, facts about the user or their projects, and threads left open. Do not repeat anything already remembered, even where the conversation itself echoed it back - a remembered fact restated by the assistant is not new. Leave out pleasantries and anything a model would know without this conversation. If the conversation added nothing worth keeping, say so in one line.`;
+
+/*
+ * Reference material -> memory. A different job from summarising a
+ * conversation, and the wrong template for it produces the wrong memory:
+ * asked to summarise a chat in which a document was pasted, a model writes
+ * about the exchange - what was shown, what it asked in return - rather than
+ * about the subject.
+ *
+ * Reads {{SOURCE}}, which is the human's turns only, so the model's own
+ * replies and clarifying questions are not in front of it to be mistaken for
+ * facts about the material.
+ */
+export const DEFAULT_DISTIL_TEMPLATE = `You are writing a reference memory for an assistant persona: a durable, compact account of the material below, which the persona should carry into later conversations.
+
+What the persona already remembers:
+{{MEMORY}}
+
+The material:
+{{SOURCE}}
+
+Write what is worth remembering about the SUBJECT of this material: what it is, what it does, the decisions and constraints that shape it, and how it relates to anything already remembered. Prefer specifics that would be hard to reconstruct - names, numbers, deliberate non-goals - over generalities. Do not describe the material as a document ("this text explains...") and do not mention that it was provided. Do not repeat anything already remembered. If it adds nothing, say so in one line.`;
 
 /*
  * Many memories -> one. Lossy by nature, which is why it is a button and not

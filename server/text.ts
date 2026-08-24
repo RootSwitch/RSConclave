@@ -66,6 +66,30 @@ export function fillTemplate(template: string, vars: Record<string, string>): st
   return out;
 }
 
+/*
+ * Only what the human put in: the source material, with every model reply
+ * left out.
+ *
+ * A conversation about a document is not the same thing as the document. Ask
+ * a model to distil reference material and the transcript hands it the
+ * material AND the assistant's reaction to it - the clarifying questions, the
+ * "would you like me to..." - and those come back out in the summary as
+ * though they were facts about the subject. Telling the summariser to ignore
+ * them is unreliable and costs tokens; not showing them is free. Same reason
+ * a persona's memory is not in its own transcript.
+ *
+ * Narrator turns count as source: they are typed by a person too.
+ */
+export function renderSourceText(entries: TranscriptEntry[]): string {
+  const lines: string[] = [];
+  for (const e of entries) {
+    if (e.kind !== 'user' && e.kind !== 'narrator') continue;
+    const body = e.text.trim();
+    if (body) lines.push(body);
+  }
+  return lines.join('\n\n');
+}
+
 /** Render a roundtable transcript as plain labeled text for judging/consolidation. */
 export function renderTranscriptText(entries: TranscriptEntry[]): string {
   const lines: string[] = [];

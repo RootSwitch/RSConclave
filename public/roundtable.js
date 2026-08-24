@@ -123,7 +123,7 @@ const Roundtable = {
       modelLabel: 'Judge model',
       roomHint: 'The judge reads the whole transcript at once - give it a window bigger than the conversation.',
       templateLabel: 'Template ({{TRANSCRIPT}} = the labeled conversation)',
-      template: App.presets.judgeTemplate || '{{TRANSCRIPT}}',
+      templates: [{ key: 'judgeTemplate', name: 'Judge', fallback: '{{TRANSCRIPT}}' }],
       runLabel: 'Run judge',
       onRun: (endpointId, model, template, params) => Api.rtConsolidate(session.id, endpointId, model, template, params),
     });

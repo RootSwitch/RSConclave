@@ -28,7 +28,7 @@ import * as council from './council.ts';
 import * as pipeline from './pipeline.ts';
 import * as chat from './chat.ts';
 import * as mem from './memory.ts';
-import { fillTemplate, renderTranscriptText, stripThink } from './text.ts';
+import { fillTemplate, renderSourceText, renderTranscriptText, stripThink } from './text.ts';
 import { estimateMessages, OLLAMA_DEFAULT_NUM_CTX } from './tokens.ts';
 import { broadcast } from './sse.ts';
 import { InputError } from './errors.ts';
@@ -791,7 +791,7 @@ function launchConsolidation(
 ): void {
   let prompt = fillTemplate(template, vars);
   // A template with no placeholder at all still has to see the transcript.
-  if (!template.includes('{{TRANSCRIPT}}') && !template.includes('{{MEMORY}}')) {
+  if (!Object.keys(vars).some((k) => template.includes(`{{${k}}}`))) {
     prompt = `${template.trim()}\n\nTRANSCRIPT:\n${vars.TRANSCRIPT}`;
   }
   launch(async () => {
@@ -836,7 +836,13 @@ export function consolidateTranscript(
     const persona = getPersonas(username).find((p) => p.id === cfg.personaId);
     if (persona) memory = mem.renderMemoryPlain(persona);
   }
-  launchConsolidation(a, member, template, { TRANSCRIPT: transcript, MEMORY: memory || '(nothing yet)' });
+  launchConsolidation(a, member, template, {
+    TRANSCRIPT: transcript,
+    // The human's turns alone. A template distilling pasted reference material
+    // wants the material, not the exchange about it - see renderSourceText.
+    SOURCE: renderSourceText(a.session.entries) || transcript,
+    MEMORY: memory || '(nothing yet)',
+  });
 }
 
 /*
@@ -867,10 +873,23 @@ export function saveMemory(
   const session = peekSession(username, sessionId);
   const entry = session.entries.find((e) => e.id === entryId);
   if (!entry) throw new InputError('entry not found', 404);
-  // Only a consolidation - a summary, a verdict, a council's synthesis. A raw
-  // reply is a turn in a conversation, not a distillation of one, and
-  // "summaries become memories" is a rule simple enough to hold in your head.
-  if (entry.kind !== 'consolidation') throw new InputError('only a summary or consolidation can be saved as a memory');
+  /*
+   * A distillation, not a turn in a conversation. Normally that means a
+   * consolidation - a summary, a verdict, a council's synthesis.
+   *
+   * A pipeline's LAST stage counts too, and is the cleanest way to make a
+   * memory there is: one stage, your own template, a document in and a
+   * distillation out, with no conversational round trip whose questions and
+   * pleasantries end up in the memory. The rule stays "the thing a run
+   * produced", not "anything a model said" - an intermediate stage is working
+   * material, and a chat reply is a turn.
+   */
+  const isFinalStage = session.mode === 'pipeline'
+    && entry.kind === 'participant'
+    && session.entries.at(-1)?.id === entry.id;
+  if (entry.kind !== 'consolidation' && !isFinalStage) {
+    throw new InputError('only a summary, a consolidation, or a pipeline\'s final output can be saved as a memory');
+  }
   const text = stripThink(entry.text).trim();
   if (!text) throw new InputError('that entry has no text to remember');
   const personas = getPersonas(username);

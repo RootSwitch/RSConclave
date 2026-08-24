@@ -510,11 +510,19 @@ function entryStatus(entry, complete) {
  * three cannot drift apart in what they offer - endpoint, model, window, cap,
  * an editable template, a run button - while each says its own words.
  *
+ * `templates` is [{ key, name }] naming preset fields. More than one draws a
+ * picker; one draws none. Either way an edit is SAVED back to that preset on
+ * blur, because these templates are the kind you tune once and then want
+ * every time - retyping a distillation prompt for the eighth document is the
+ * friction this exists to remove.
+ *
  * onRun(endpointId, model, template, params) does the work. It is awaited so
  * a failure lands in an alert rather than nowhere, and the button is held
  * down meanwhile so a slow server cannot collect two clicks.
  */
-function judgeSection({ summary, modelLabel, templateLabel, template, runLabel, roomHint, onRun, open = false }) {
+function judgeSection({ summary, modelLabel, templateLabel, templates, template, runLabel, roomHint, onRun, open = false }) {
+  // Single-template callers pass a literal string; normalise to the list form.
+  const list = templates ?? [{ key: null, name: '', fallback: template ?? '' }];
   const endpointSel = el('select', {}, ...App.config.endpoints.map((ep) => el('option', { value: ep.id }, ep.name)));
   const modelSel = el('select', {});
   const fillModels = async () => {
@@ -530,7 +538,34 @@ function judgeSection({ summary, modelLabel, templateLabel, template, runLabel, 
   };
   if (App.config.endpoints.length) fillModels();
   endpointSel.onchange = fillModels;
-  const templateEl = el('textarea', { rows: 6 }, template);
+  const textOf = (t) => (t.key ? App.presets[t.key] : undefined) ?? t.fallback ?? '';
+  let current = list[0];
+  const templateEl = el('textarea', { rows: 6 }, textOf(current));
+  const savedNote = el('span', { class: 'muted' });
+  const persist = async () => {
+    if (!current.key || templateEl.value === textOf(current)) return;
+    App.presets = { ...App.presets, [current.key]: templateEl.value };
+    try {
+      await Api.putPresets(App.presets);
+      savedNote.textContent = 'saved';
+      setTimeout(() => { savedNote.textContent = ''; }, 1400);
+    } catch (e) {
+      savedNote.textContent = `not saved: ${e.message}`;
+    }
+  };
+  // On blur, not per keystroke: one write when you stop typing, not one per
+  // character. 'change' on a textarea fires exactly there.
+  templateEl.addEventListener('change', persist);
+  const templateSel = list.length > 1
+    ? el('select', {}, ...list.map((t, i) => el('option', { value: String(i) }, t.name)))
+    : null;
+  if (templateSel) {
+    templateSel.onchange = async () => {
+      await persist(); // do not lose an edit by switching away from it
+      current = list[Number(templateSel.value)];
+      templateEl.value = textOf(current);
+    };
+  }
   const ctxEl = ctxInput();
   const maxOutEl = maxTokensInput();
   ollamaOnly(ctxEl, endpointSel); // filled at construction, no re-sync
@@ -538,6 +573,7 @@ function judgeSection({ summary, modelLabel, templateLabel, template, runLabel, 
     if (!modelSel.value) return;
     runBtn.disabled = true;
     try {
+      await persist(); // running is as good a moment to keep an edit as blurring
       await onRun(endpointSel.value, modelSel.value, templateEl.value, genParams(undefined, ctxEl.value, maxOutEl.value));
     } catch (e) {
       alert(e.message);
@@ -552,7 +588,11 @@ function judgeSection({ summary, modelLabel, templateLabel, template, runLabel, 
         el('label', {}, modelLabel), endpointSel, modelSel, ctxEl, maxOutEl,
         roomHint ? el('span', { class: 'muted', title: roomHint }, '⟵ give it room') : null,
       ),
-      el('label', {}, templateLabel),
+      el('div', { class: 'row' },
+        el('label', {}, templateLabel),
+        templateSel,
+        savedNote,
+      ),
       templateEl,
       el('div', { class: 'row' }, runBtn),
     ),

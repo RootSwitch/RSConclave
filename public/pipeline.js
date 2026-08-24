@@ -234,6 +234,16 @@ const Pipeline = {
     if (generating && !complete) {
       actions.push(el('button', { class: 'mini danger', onclick: () => Api.cancel().catch(() => {}) }, 'Cancel'));
     }
+    /*
+     * The last stage's output is what the pipeline produced, so it can become
+     * a persona memory. This is the cleanest route to one there is: a document
+     * in, your own template, a distillation out, and no conversation whose
+     * questions and pleasantries end up in the memory. Only the last stage -
+     * an intermediate output is working material, not the product.
+     */
+    if (!generating && complete && entry.text && session.entries.at(-1)?.id === entry.id) {
+      actions.push(saveMemoryButton(session, entry));
+    }
 
     const body = el('div', { class: 'card-body', dataset: { entryBody: entry.id } });
     if (complete) renderEntryText(body, entry.text, entry.kind);

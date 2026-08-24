@@ -20,6 +20,7 @@ import type { AppConfig, Persona, Presets, Session } from './types.ts';
 import {
   DEFAULT_COMPACT_TEMPLATE,
   DEFAULT_CONSOLIDATOR_TEMPLATE,
+  DEFAULT_DISTIL_TEMPLATE,
   DEFAULT_JUDGE_TEMPLATE,
   DEFAULT_PERSONAS,
   DEFAULT_SUMMARIZE_TEMPLATE,
@@ -52,6 +53,7 @@ const defaultPresets: Presets = {
   consolidatorTemplate: DEFAULT_CONSOLIDATOR_TEMPLATE,
   judgeTemplate: DEFAULT_JUDGE_TEMPLATE,
   summarizeTemplate: DEFAULT_SUMMARIZE_TEMPLATE,
+  distilTemplate: DEFAULT_DISTIL_TEMPLATE,
   compactTemplate: DEFAULT_COMPACT_TEMPLATE,
   councils: [],
   roundtables: [],

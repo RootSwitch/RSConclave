@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Persona, RoundtableConfig, TranscriptEntry } from '../types.ts';
-import { DEFAULT_COMPACT_TEMPLATE, DEFAULT_SUMMARIZE_TEMPLATE } from '../types.ts';
+import { DEFAULT_COMPACT_TEMPLATE, DEFAULT_DISTIL_TEMPLATE, DEFAULT_SUMMARIZE_TEMPLATE } from '../types.ts';
 import { memoryTokens, renderMemoryLayer, renderMemoryPlain } from '../memory.ts';
 import { buildChatMessages, buildSystemPrompt } from '../chat.ts';
 import { buildSystemPrompt as buildRoundtablePrompt } from '../roundtable.ts';
-import { fillTemplate, renderTranscriptText } from '../text.ts';
+import { fillTemplate, renderSourceText, renderTranscriptText } from '../text.ts';
 
 const remembering: Persona = {
   id: 'p1',
@@ -122,4 +122,42 @@ test('default templates: the summariser sees the memory and is asked for the del
   assert.ok(DEFAULT_COMPACT_TEMPLATE.includes('{{MEMORY}}'));
   assert.ok(!DEFAULT_COMPACT_TEMPLATE.includes('{{TRANSCRIPT}}'));
   assert.match(DEFAULT_COMPACT_TEMPLATE, /shorter than the input/i);
+});
+
+test('source rendering: the material only, with every model reply left out', () => {
+  // The whole point of {{SOURCE}}: a conversation ABOUT a document is not the
+  // document, and a distillation prompt handed the assistant's clarifying
+  // questions writes them back out as though they were facts.
+  const entries = [
+    entry({ kind: 'user', speaker: 'You', text: '# RSCanvas\nA converged monitoring monolith.' }),
+    entry({ speaker: 'qwen', text: 'Thanks! Would you like me to focus on the architecture?' }),
+    entry({ kind: 'user', speaker: 'You', text: 'It targets 15k entities.' }),
+    entry({ kind: 'consolidation', speaker: 'qwen', text: 'A summary of the above.' }),
+  ];
+  const source = renderSourceText(entries);
+  assert.ok(source.includes('# RSCanvas'));
+  assert.ok(source.includes('It targets 15k entities.'));
+  assert.ok(!source.includes('Would you like me'), 'the assistant is not source material');
+  assert.ok(!source.includes('A summary of the above'), 'nor is a previous summary');
+  // The transcript form still carries everything - the two are different jobs.
+  const transcript = renderTranscriptText(entries);
+  assert.ok(transcript.includes('Would you like me'));
+});
+
+test('source rendering: narrator injections count, because a person typed them', () => {
+  const source = renderSourceText([
+    entry({ kind: 'narrator', speaker: 'Narrator', text: 'The building loses power.' }),
+    entry({ speaker: 'model', text: 'I reach for the torch.' }),
+  ]);
+  assert.equal(source, 'The building loses power.');
+});
+
+test('default templates: the distillation reads SOURCE and is about the subject', () => {
+  assert.ok(DEFAULT_DISTIL_TEMPLATE.includes('{{SOURCE}}'));
+  assert.ok(DEFAULT_DISTIL_TEMPLATE.includes('{{MEMORY}}'));
+  // It must not be handed the whole exchange - that is the other template.
+  assert.ok(!DEFAULT_DISTIL_TEMPLATE.includes('{{TRANSCRIPT}}'));
+  assert.match(DEFAULT_DISTIL_TEMPLATE, /SUBJECT/);
+  // And it should say not to write about the material as a document.
+  assert.match(DEFAULT_DISTIL_TEMPLATE, /not describe the material as a document/i);
 });

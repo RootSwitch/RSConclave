@@ -86,10 +86,21 @@ const Chat = {
         : 'The summariser reads the whole conversation at once - give it a window bigger than the chat.',
       templateLabel: compacting
         ? 'Template ({{MEMORY}} = the memories being compacted)'
-        : 'Template ({{TRANSCRIPT}} = the conversation, {{MEMORY}} = what the persona already remembers)',
-      template: compacting
-        ? (App.presets.compactTemplate || '{{MEMORY}}')
-        : (App.presets.summarizeTemplate || '{{TRANSCRIPT}}'),
+        : 'Template - {{TRANSCRIPT}} whole conversation, {{SOURCE}} your messages only, {{MEMORY}} what is already remembered',
+      /*
+       * Two jobs, two templates. Summarising a conversation and distilling
+       * reference material want opposite things: one is about the exchange,
+       * the other about the subject, and the wrong one produces a memory that
+       * describes a document being shown rather than what it said. The
+       * distillation template reads {{SOURCE}} so the model's own clarifying
+       * questions are not in front of it to be mistaken for facts.
+       */
+      templates: compacting
+        ? [{ key: 'compactTemplate', name: 'Compact', fallback: '{{MEMORY}}' }]
+        : [
+            { key: 'summarizeTemplate', name: 'Conversation', fallback: '{{TRANSCRIPT}}' },
+            { key: 'distilTemplate', name: 'Reference material', fallback: '{{SOURCE}}' },
+          ],
       runLabel: compacting ? 'Compact again' : 'Summarise',
       onRun: (endpointId, model, template, params) => Api.chatSummarize(session.id, endpointId, model, template, params),
     });
