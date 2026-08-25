@@ -537,7 +537,7 @@ function judgeSection({ summary, modelLabel, templateLabel, templates, template,
   const list = templates ?? [{ key: null, name: '', fallback: template ?? '' }];
   const endpointSel = el('select', {}, ...App.config.endpoints.map((ep) => el('option', { value: ep.id }, ep.name)));
   const modelSel = el('select', {});
-  // A remembered seat (a pairing's summariser) is preselected, so the
+  // A remembered seat (a preset's summariser) is preselected, so the
   // combination you settled on is the one already in the boxes.
   if (seat?.endpointId && [...endpointSel.options].some((o) => o.value === seat.endpointId)) {
     endpointSel.value = seat.endpointId;
@@ -595,7 +595,7 @@ function judgeSection({ summary, modelLabel, templateLabel, templates, template,
       const params = genParams(undefined, ctxEl.value, maxOutEl.value);
       await onRun(endpointSel.value, modelSel.value, templateEl.value, params);
       // Learned from use rather than configured: the summariser you actually
-      // ran becomes the one this pairing offers next time.
+      // ran becomes the one this preset offers next time.
       await onSeat?.({ endpointId: endpointSel.value, model: modelSel.value, params });
     } catch (e) {
       alert(e.message);

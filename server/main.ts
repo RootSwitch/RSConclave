@@ -55,7 +55,7 @@ const defaultPresets: Presets = {
   summarizeTemplate: DEFAULT_SUMMARIZE_TEMPLATE,
   distilTemplate: DEFAULT_DISTIL_TEMPLATE,
   compactTemplate: DEFAULT_COMPACT_TEMPLATE,
-  pairings: [],
+  chats: [],
   councils: [],
   roundtables: [],
   pipelines: [],
@@ -291,7 +291,16 @@ route('GET', '/api/presets', (req, res) => {
   // Defaults underneath the saved file, not only in its absence: an account
   // that saved presets before a template existed would otherwise get no
   // template at all for it, and the client's fallback is a bare placeholder.
-  sendJson(res, 200, { ...defaultPresets, ...store.loadUser<Presets>(userOf(req), 'presets', defaultPresets) });
+  const saved = store.loadUser<Presets>(userOf(req), 'presets', defaultPresets);
+  /*
+   * This list was called 'pairings' for one release before it took the name
+   * the other three modes already used. Carried across rather than orphaned -
+   * a saved combination is a small thing to lose, and losing it silently to a
+   * rename is the kind of thing that teaches people not to trust saving.
+   */
+  const legacy = (saved as { pairings?: Presets['chats'] }).pairings;
+  const chats = saved.chats?.length ? saved.chats : legacy ?? saved.chats;
+  sendJson(res, 200, { ...defaultPresets, ...saved, ...(chats ? { chats } : {}) });
 });
 route('PUT', '/api/presets', async (req, res) => {
   const me = userOf(req);

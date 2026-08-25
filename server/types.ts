@@ -153,12 +153,12 @@ export interface ChatConfig {
   systemPrompt?: string; // free text, layered after the persona
   params?: GenParams;
   /*
-   * The pairing this chat was started from, if any. Recorded so the summarise
+   * The preset this chat was started from, if any. Recorded so the summarise
    * fold can default to the same summariser every time - a memory-building
    * chat is the case where you use one combination over and over, and picking
    * the model again on every one is the friction.
    */
-  pairingId?: string;
+  presetId?: string;
   /*
    * Set on a session created to compact a persona's memory. The session
    * deliberately has no personaId - the memories are its user turn, and
@@ -238,19 +238,19 @@ export interface Presets {
   distilTemplate?: string; // reference material -> persona memory, {{SOURCE}} and {{MEMORY}}
   compactTemplate?: string; // many memories -> one, {{MEMORY}}
   /*
-   * A remembered persona-and-model combination.
+   * Saved chat setups: model, persona and settings under a name.
    *
-   * Building a persona's memory means the same persona, the same model and
-   * the same summariser, over and over - and every one of those was a
-   * separate pick on a form each time. A pairing is that combination named
-   * and reusable. It is deliberately a preset rather than a fifth session
-   * mode: everything that differs is which fields the form starts with and
-   * how the session is labelled, and neither needs its own state machine.
+   * The three other modes have had presets all along; chat was the one
+   * without, which stopped making sense when building a persona's memory
+   * meant picking the same persona, the same model and the same summariser
+   * over and over. Same idea as a council preset, which stores its members
+   * and its consolidator - so it carries the same name rather than inventing
+   * a concept, and chat stops being the odd mode out.
    *
    * `summarizer` is written back whenever a summary runs in a session started
-   * from the pairing, so the last one used becomes the next one offered.
+   * from the preset, so the last one used becomes the next one offered.
    */
-  pairings?: Array<{
+  chats?: Array<{
     id: string;
     name: string;
     personaId?: string;

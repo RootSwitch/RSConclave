@@ -103,16 +103,16 @@ const Chat = {
           ],
       runLabel: compacting ? 'Compact again' : 'Summarise',
       onRun: (endpointId, model, template, params) => Api.chatSummarize(session.id, endpointId, model, template, params),
-      // A chat started from a pairing remembers which summariser it used, so
+      // A chat started from a preset remembers which summariser it used, so
       // the tenth memory-building conversation does not re-pick the model the
       // first nine used.
-      seat: (App.presets.pairings ?? []).find((p) => p.id === session.config.pairingId)?.summarizer,
+      seat: (App.presets.chats ?? []).find((p) => p.id === session.config.presetId)?.summarizer,
       onSeat: async (used) => {
-        const list = App.presets.pairings ?? [];
-        const p = list.find((x) => x.id === session.config.pairingId);
+        const list = App.presets.chats ?? [];
+        const p = list.find((x) => x.id === session.config.presetId);
         if (!p) return;
         const next = list.map((x) => (x.id === p.id ? { ...x, summarizer: used } : x));
-        App.presets = { ...App.presets, pairings: next };
+        App.presets = { ...App.presets, chats: next };
         await Api.putPresets(App.presets).catch(() => {}); // a preference, not the work
       },
     });
@@ -156,20 +156,19 @@ const Chat = {
     const sizeEl = el('span', { class: 'prompt-size' });
     const fitEl = el('span', { class: 'fit-tag' });
     /*
-     * A pairing: one named persona-and-model combination, picked in one go.
-     * Building a persona's memory means the same persona, the same model and
-     * the same summariser over and over, and every one of those used to be a
-     * separate choice on this form. Deliberately a preset rather than a fifth
-     * session mode - what differs is which fields the form starts with and
-     * how the session is labelled, and neither needs its own state machine.
+     * A saved chat setup: model, persona and settings under a name. The other
+     * three modes have had presets all along and chat did not, which stopped
+     * making sense once building a persona's memory meant picking the same
+     * combination over and over. Same word as the other modes on purpose -
+     * this is not a new concept, it is the one chat was missing.
      */
-    const pairingSel = el('select', {}, el('option', { value: '' }, ' - pairing - '),
-      ...(App.presets.pairings ?? []).map((p) => el('option', { value: p.id }, p.name)));
+    const presetSel = el('select', {}, el('option', { value: '' }, ' - load preset - '),
+      ...(App.presets.chats ?? []).map((p) => el('option', { value: p.id }, p.name)));
     // Says what picking a remembering persona actually commits you to, beside
     // the control that does it - the same mark the sidebar uses on the
     // sessions that result.
     const personaNoteEl = el('span', { class: 'muted' });
-    this.setup = { endpoint, model, persona, system, message, temp, ctx, maxOut, errEl, sizeEl, fitEl, pairingSel, personaNoteEl };
+    this.setup = { endpoint, model, persona, system, message, temp, ctx, maxOut, errEl, sizeEl, fitEl, presetSel, personaNoteEl };
 
     for (const ep of App.config.endpoints) endpoint.append(el('option', { value: ep.id }, ep.name));
     syncCtx(); // options exist now, so the kind is finally knowable
@@ -190,8 +189,8 @@ const Chat = {
     endpoint.onchange = fillModels;
     this.setup.fillModels = fillModels; // applyConfig waits on this before picking a model
 
-    pairingSel.onchange = async () => {
-      const p = (App.presets.pairings ?? []).find((x) => x.id === pairingSel.value);
+    presetSel.onchange = async () => {
+      const p = (App.presets.chats ?? []).find((x) => x.id === presetSel.value);
       if (!p) return;
       if ([...endpoint.options].some((o) => o.value === p.endpointId)) endpoint.value = p.endpointId;
       await fillModels();
@@ -203,12 +202,12 @@ const Chat = {
       syncCtx();
       this.refreshSetupFit();
     };
-    const savePairing = async () => {
-      if (!model.value) { errEl.textContent = 'Pick a model before saving a pairing.'; return; }
-      const name = prompt('Name this pairing (persona + model):',
+    const savePreset = async () => {
+      if (!model.value) { errEl.textContent = 'Pick a model before saving a preset.'; return; }
+      const name = prompt('Name this preset (persona + model):',
         `${App.personas.find((x) => x.id === persona.value)?.name ?? 'No persona'} + ${modelLabel(endpoint.value, model.value)}`);
       if (!name?.trim()) return;
-      const existing = (App.presets.pairings ?? []).find((x) => x.name === name.trim());
+      const existing = (App.presets.chats ?? []).find((x) => x.name === name.trim());
       const entry = {
         id: existing?.id ?? 'pr' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
         name: name.trim(),
@@ -216,24 +215,24 @@ const Chat = {
         endpointId: endpoint.value,
         model: model.value,
         params: genParams(temp.value, ctx.value, maxOut.value),
-        // Kept if this pairing already had one: the summariser is learned from
+        // Kept if this preset already had one: the summariser is learned from
         // use (see the summarise fold), not typed in here.
         summarizer: existing?.summarizer,
       };
-      const list = [...(App.presets.pairings ?? []).filter((x) => x.id !== entry.id), entry];
-      App.presets = { ...App.presets, pairings: list };
+      const list = [...(App.presets.chats ?? []).filter((x) => x.id !== entry.id), entry];
+      App.presets = { ...App.presets, chats: list };
       await Api.putPresets(App.presets);
-      pairingSel.replaceChildren(el('option', { value: '' }, ' - pairing - '),
+      presetSel.replaceChildren(el('option', { value: '' }, ' - load preset - '),
         ...list.map((p) => el('option', { value: p.id }, p.name)));
-      pairingSel.value = entry.id;
+      presetSel.value = entry.id;
     };
 
     const band = el('div', { class: 'setup-band' },
       el('div', { class: 'row' },
-        el('label', { title: 'A saved persona + model + settings combination. Memory-building chats reuse the same one every time.' }, 'Pairing'),
-        pairingSel,
-        el('button', { onclick: () => savePairing().catch((e) => alert(e.message)) }, 'Save as pairing'),
-        presetDeleteButton(() => this.setup.pairingSel, 'pairings'),
+        el('label', { title: 'A saved chat setup: model, persona and settings under a name. Memory-building chats reuse the same one every time.' }, 'Preset'),
+        presetSel,
+        el('button', { onclick: () => savePreset().catch((e) => alert(e.message)) }, 'Save as preset'),
+        presetDeleteButton(() => this.setup.presetSel, 'chats'),
       ),
       el('div', { class: 'row' },
         el('label', {}, 'Model'), endpoint, model,
@@ -330,7 +329,7 @@ const Chat = {
         systemPrompt: s.system.value.trim() || undefined,
         params: genParams(s.temp.value, s.ctx.value, s.maxOut.value),
         // Recorded so the summarise fold can offer the same summariser again.
-        pairingId: s.pairingSel.value || undefined,
+        presetId: s.presetSel.value || undefined,
       }));
       if (!started) return; // box was busy and you chose to leave it running
       const { sessionId } = started;

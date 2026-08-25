@@ -482,11 +482,12 @@ is working material.
 One memory per document, rather than one chat covering everything: each entry then carries the
 document it came from, and a fact that turns out to be wrong can be deleted on its own.
 
-#### Pairings, forks, and what the app refuses to remember
+#### Presets, forks, and what the app refuses to remember
 
 Building a memory means the same persona, the same model and the same summariser over and over.
-A **pairing** saves that combination under a name; picking it fills the chat form in one go, and
-the summariser is learned from use, so the one you ran last time is the one offered next. A
+A chat **preset** saves that combination under a name - the same presets the other three modes
+have always had, which chat was missing. Picking one fills the form in one go, and the
+summariser is learned from use, so the one you ran last time is the one offered next. A
 conversation wearing a persona that remembers is marked in the sidebar with the persona's name -
 what is said in one outlives it, so it is worth knowing before you open or delete it.
 

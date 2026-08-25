@@ -26,12 +26,13 @@ history forward under two different models and watching where they diverge.
 The copied entries get fresh ids, so pruning one fork leaves the other alone,
 and each keeps the conversation it came from.
 
-**Pairings: a named persona-and-model combination.** Building a memory means
-the same persona, the same model and the same summariser over and over, and
-every one of those was a separate pick on a form. A pairing is that
-combination saved and reused; the summariser is learned from use rather than
-configured, so the one you ran last time is the one offered next. Sessions
-started from a pairing record it.
+**Chat gets presets, like the other three modes always had.** Building a
+memory means the same persona, the same model and the same summariser over and
+over, and every one of those was a separate pick on a form. A chat preset
+saves that combination under a name, alongside the council, roundtable and
+pipeline presets - not a new concept, just the one chat was missing. The
+summariser is learned from use rather than configured, so the one you ran last
+time is the one offered next. Sessions started from a preset record it.
 
 **The sidebar marks a conversation that feeds a memory** with a glyph and the
 persona's name, because what is said in one outlives it - and the list was the
