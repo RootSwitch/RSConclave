@@ -501,7 +501,8 @@ async function runCouncil(): Promise<void> {
     const m = config.members[i];
     const entry = await runTurn(a, {
       member: m,
-      messages: council.buildMemberHistory(a.session.entries, i, config.ballot),
+      messages: council.buildMemberHistory(a.session.entries, i, config.ballot,
+        council.buildMemberSystemPrompt(m, getPersonas(a.owner))),
       entrySeed: { kind: 'participant', speaker: m.model, model: m.model, memberIndex: i },
       keepAlive: config.unloadBetweenModels ? '0' : undefined,
     });
@@ -597,7 +598,8 @@ export function rerunMember(username: string, sessionId: string, memberIndex: nu
   launch(async () => {
     await runTurn(a, {
       member: m,
-      messages: council.buildMemberHistory(a.session.entries, memberIndex, config.ballot),
+      messages: council.buildMemberHistory(a.session.entries, memberIndex, config.ballot,
+        council.buildMemberSystemPrompt(m, getPersonas(username))),
       entrySeed: { kind: 'participant', speaker: m.model, model: m.model, memberIndex },
       keepAlive: config.unloadBetweenModels ? '0' : undefined,
     });

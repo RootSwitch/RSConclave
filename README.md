@@ -59,8 +59,11 @@ and every transcript **exports** as markdown.
   amber when a bigger `num_ctx` on that row would fix it, red when the prompt is past what the
   model was trained for. **Fit this prompt** raises every checked seat at once, capped at each
   model's trained maximum. See [Right-sizing before you send](#right-sizing-before-you-send).
-  The same model can sit on the council more than once (the + on a model row) at different
-  temperatures - self-consistency for free. After the synthesis, ask a **follow-up round**:
+  Each member can wear a **persona**, though the default is the bare prompt with nothing added,
+  which is what keeps answers comparable. The same model can sit on the council more than once
+  (the + on a model row) at a different temperature or under a different persona - so two
+  standing instructions can be put against each other on one question and judged by the
+  consolidator. After the synthesis, ask a **follow-up round**:
   every member answers the new question with its own previous answer as context. Give it a
   **ballot** (a list of options) and every member is asked to finish with one of them, tallied
   above the responses - the prose still happens, because "four of five said yes" and the

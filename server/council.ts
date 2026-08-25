@@ -1,7 +1,26 @@
 // Council mode: transcript assembly and consolidator prompt templating.
-import type { ChatMessage, CouncilConfig, TranscriptEntry } from './types.ts';
+import type { ChatMessage, CouncilConfig, CouncilMember, Persona, TranscriptEntry } from './types.ts';
 import { incompleteNote, isFinishedTurn, stripThink } from './text.ts';
 import { ballotInstruction } from './vote.ts';
+import { renderMemoryLayer } from './memory.ts';
+
+/**
+ * A member's standing instructions: its persona, and whatever that persona
+ * remembers. Same layering and the same order as chat and roundtable, so one
+ * persona behaves the same wherever it is seated.
+ *
+ * Empty for a member with no persona, which is every member unless you say
+ * otherwise - a council's default is still the bare prompt.
+ */
+export function buildMemberSystemPrompt(member: CouncilMember, personas: Persona[]): string {
+  const persona = member.personaId ? personas.find((p) => p.id === member.personaId) : undefined;
+  if (!persona) return '';
+  const layers: string[] = [];
+  if (persona.systemPrompt.trim()) layers.push(persona.systemPrompt.trim());
+  const memory = renderMemoryLayer(persona);
+  if (memory) layers.push(memory);
+  return layers.join('\n\n');
+}
 
 /**
  * Render the {{RESPONSES}} block from completed member entries.
@@ -91,8 +110,13 @@ export function buildMemberHistory(
   entries: TranscriptEntry[],
   memberIndex: number,
   ballot?: string[],
+  systemPrompt?: string,
 ): ChatMessage[] {
   const msgs: ChatMessage[] = [];
+  // Ahead of the history, as everywhere else. Absent for a member with no
+  // persona, so the default council behaviour - the bare prompt, nothing to
+  // make one member's answer incomparable with another's - is unchanged.
+  if (systemPrompt?.trim()) msgs.push({ role: 'system', content: systemPrompt.trim() });
   let pendingResponse: string | null = null;
   const flush = () => {
     if (pendingResponse !== null) {

@@ -72,6 +72,14 @@ export interface CouncilMember {
   endpointId: string;
   model: string;
   params?: GenParams;
+  /*
+   * A council member is normally sent the bare prompt and nothing else, which
+   * is what makes its answers comparable. A persona is the deliberate
+   * exception: it is what lets the same model sit twice with two different
+   * standing instructions and be judged head to head, which is the only thing
+   * the + button was ever really for.
+   */
+  personaId?: string;
 }
 
 export interface CouncilConfig {

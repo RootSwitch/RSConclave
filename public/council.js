@@ -235,10 +235,23 @@ const Council = {
     const ctx = ctxInput(opts.numCtx);
     ollamaOnly(ctx, endpointId); // fixed endpoint for this row, so no re-sync needed
     const maxOut = maxTokensInput(opts.maxTokens);
+    /*
+     * A council member is normally sent the bare prompt, which is what makes
+     * the answers comparable. A persona is the deliberate exception, and it is
+     * what finally gives the + button a point: the same model twice under two
+     * standing instructions, answering the same question, judged side by side.
+     * Before this, cloning a row could only differ by temperature.
+     */
+    const persona = el('select', { title: 'Standing instructions for this seat. Leave as - none - and the member is sent the bare prompt, which is the default and keeps members comparable.' },
+      el('option', { value: '' }, ' - none - '),
+      ...App.personas.map((p) => el('option', { value: p.id },
+        `${p.name}${p.memories?.length ? ` (${p.memories.length})` : ''}`)));
+    if (opts.personaId) persona.value = opts.personaId;
     // Every row carries its own fit tag, clones included: a clone shares the
     // model but has its own ctx box, so it can be sized differently.
     const fitEl = el('span', { class: 'fit-tag' });
-    const row = { endpointId, model, cb, tempInput: temp, ctxInput: ctx, maxOutInput: maxOut, fitEl, isClone: !!opts.isClone };
+    const row = { endpointId, model, cb, personaInput: persona, tempInput: temp, ctxInput: ctx, maxOutInput: maxOut, fitEl, isClone: !!opts.isClone };
+    persona.addEventListener('change', () => this.refreshFit());
     // Typing a bigger window must clear the warning it caused, or the fix
     // looks like it did nothing until the next render.
     ctx.addEventListener('input', () => this.refreshFit());
@@ -268,7 +281,7 @@ const Council = {
       opts.isClone ? null : ctxTag(endpointId, model),
       fitEl,
       el('span', { class: 'grow' }),
-      temp, ctx, maxOut, ...controls);
+      persona, temp, ctx, maxOut, ...controls);
     this.form.memberRows.push(row);
     return row;
   },
@@ -292,7 +305,10 @@ const Council = {
     let checked = 0;
     let short = 0;
     for (const row of f.memberRows) {
-      const verdict = fitVerdict(needed, App.modelInfo(row.endpointId, row.model), row.ctxInput.value);
+      // A seat wearing a persona is sent that persona and its memories on top
+      // of the prompt, so it needs more room than a bare one.
+      const verdict = fitVerdict(needed + personaTokens(row.personaInput.value),
+        App.modelInfo(row.endpointId, row.model), row.ctxInput.value);
       renderFitTag(row.fitEl, verdict);
       if (row.cb.checked) {
         checked++;
@@ -351,7 +367,8 @@ const Council = {
 
     for (const row of rows) {
       raise(row.ctxInput, App.modelInfo(row.endpointId, row.model),
-        needed + REPLY_HEADROOM_TOKENS, modelLabel(row.endpointId, row.model));
+        needed + personaTokens(row.personaInput.value) + REPLY_HEADROOM_TOKENS,
+        modelLabel(row.endpointId, row.model));
     }
     if (f.consolidateEl.checked) {
       const [cEp, cModel] = (f.consolidatorSel.value || '|').split('|');
@@ -414,6 +431,7 @@ const Council = {
       members.push({
         endpointId: row.endpointId,
         model: row.model,
+        personaId: row.personaInput.value || undefined,
         params: genParams(row.tempInput.value, row.ctxInput.value, row.maxOutInput.value),
       });
     }
@@ -454,6 +472,7 @@ const Council = {
         row.rowEl.remove();
       } else {
         row.cb.checked = false;
+        row.personaInput.value = '';
         row.tempInput.value = '';
         row.ctxInput.value = '';
       }
@@ -462,6 +481,7 @@ const Council = {
       const base = f.memberRows.find((r) => r.endpointId === m.endpointId && r.model === m.model && !r.cb.checked);
       if (base) {
         base.cb.checked = true;
+        base.personaInput.value = m.personaId ?? '';
         if (m.params?.temperature !== undefined) base.tempInput.value = m.params.temperature;
         if (m.params?.num_ctx !== undefined) base.ctxInput.value = m.params.num_ctx;
       } else {
@@ -469,6 +489,7 @@ const Council = {
         if (!anchor) continue; // model no longer on the box
         const clone = this.addMemberRow(m.endpointId, m.model, {
           isClone: true, checked: true,
+          personaId: m.personaId,
           temp: m.params?.temperature,
           numCtx: m.params?.num_ctx,
         });

@@ -368,10 +368,8 @@ const Roundtable = {
     for (const p of this.parts) {
       const els = p.els;
       if (els.endpoint.value === '__human') { renderFitTag(els.fit, null); continue; }
-      const persona = App.personas.find((x) => x.id === els.persona.value);
-      const memory = (persona?.memories ?? []).reduce((n, m) => n + estimateTokens(m.text) + 14, 0);
       const standing = ROUNDTABLE_FRAMING_TOKENS + scenario + estimateTokens(els.overlay.value)
-        + estimateTokens(persona?.systemPrompt ?? '') + memory;
+        + personaTokens(els.persona.value);
       renderFitTag(els.fit, fitVerdict(standing, App.modelInfo(els.endpoint.value, els.model.value), els.ctx.value));
     }
   },

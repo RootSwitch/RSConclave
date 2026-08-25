@@ -173,6 +173,19 @@ const ASSUMED_REPLY_TOKENS = 1024;
 const ROUNDTABLE_FRAMING_TOKENS = 90;
 
 /**
+ * What a persona costs a seat wearing it: its prompt plus everything it
+ * remembers, both sent on every turn. Zero for no persona, which is why a
+ * seat without one is measured on the prompt alone.
+ */
+function personaTokens(personaId) {
+  const p = App.personas.find((x) => x.id === personaId);
+  if (!p) return 0;
+  // Per entry: the text, plus the date line and the blank line between them.
+  const memory = (p.memories ?? []).reduce((n, m) => n + estimateTokens(m.text) + 14, 0);
+  return estimateTokens(p.systemPrompt ?? '') + memory;
+}
+
+/**
  * Can this seat take a prompt of `needed` tokens? Three answers, because a
  * model has three different ceilings:
  *

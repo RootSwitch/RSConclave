@@ -456,9 +456,19 @@ details[open] summary { margin-bottom: 9px; }
     border-radius: 4px;
     padding: 8px;
 }
-.participant-row { grid-template-columns: 32px 110px 1fr 1fr 1fr 62px 72px 30px; }
-.stage-row { grid-template-columns: 140px 1fr 1fr 62px 72px 30px; }
+/* Count these against the row's children in roundtable.js and pipeline.js:
+   a column short and the last control lands in the remove button's 30px slot
+   and hangs out past the border, while the button itself wraps to a line of
+   its own. That is what "max out" did after it was added and the templates
+   were not grown to match.
+   participant: colour name endpoint model persona temp ctx maxOut remove
+   stage:            name endpoint model      temp ctx maxOut remove */
+.participant-row { grid-template-columns: 32px 110px 1fr 1fr 1fr 62px 72px 72px 30px; }
+.stage-row { grid-template-columns: 140px 1fr 1fr 62px 72px 72px 30px; }
 .participant-row textarea, .stage-row textarea { grid-column: 1 / -1; min-height: 32px; }
+/* Full width, or the seat's fit warning is dealt the 32px colour column and
+   its message runs off the side of the row. */
+.participant-row .fit-tag { grid-column: 1 / -1; }
 
 /* The ONE scroller between topbar and gate bar: header, brief, judge panel
    and transcript all ride inside it, so the wheel works everywhere and an

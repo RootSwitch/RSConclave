@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildConsolidatorPrompt, buildMemberHistory, joinedPrompts, renderResponses, renderTemplate } from '../council.ts';
+import { buildConsolidatorPrompt, buildMemberHistory, buildMemberSystemPrompt, joinedPrompts, renderResponses, renderTemplate } from '../council.ts';
+import type { Persona } from '../types.ts';
+
+const personas: Persona[] = [{
+  id: 'terse', name: 'Terse', systemPrompt: 'Answer directly.',
+  memories: [{ id: 'm', at: '2026-08-20T00:00:00Z', text: 'The user prefers Q4_K_M quants.' }],
+}];
 import type { CouncilConfig, TranscriptEntry } from '../types.ts';
 
 const config: CouncilConfig = {
@@ -130,4 +136,39 @@ test('joinedPrompts: single and multiple prompts', () => {
     joinedPrompts([entry({ kind: 'user', text: 'Q1' }), entry({ kind: 'user', text: 'Q2' })]),
     'Q1\n\nFOLLOW-UP:\nQ2',
   );
+});
+
+test('buildMemberSystemPrompt: nothing for a member without a persona', () => {
+  // The council default is the bare prompt. That is what makes one member's
+  // answer comparable with another's, so a persona has to be asked for.
+  assert.equal(buildMemberSystemPrompt({ endpointId: 'e', model: 'm' }, personas), '');
+  assert.equal(buildMemberSystemPrompt({ endpointId: 'e', model: 'm', personaId: 'nope' }, personas), '');
+});
+
+test('buildMemberSystemPrompt: persona then its memories, as everywhere else', () => {
+  const sys = buildMemberSystemPrompt({ endpointId: 'e', model: 'm', personaId: 'terse' }, personas);
+  const iPrompt = sys.indexOf('Answer directly.');
+  const iMemory = sys.indexOf('Things you remember');
+  assert.ok(iPrompt >= 0 && iMemory > iPrompt, sys);
+  assert.ok(sys.includes('prefers Q4_K_M'));
+});
+
+test('buildMemberHistory: a system prompt rides ahead of the history', () => {
+  const entries = [
+    entry({ kind: 'user', speaker: 'You', text: 'Q1' }),
+    entry({ kind: 'participant', memberIndex: 0, text: 'A1' }),
+    entry({ kind: 'user', speaker: 'You', text: 'Q2' }),
+  ];
+  assert.deepEqual(buildMemberHistory(entries, 0, undefined, 'Be terse.'), [
+    { role: 'system', content: 'Be terse.' },
+    { role: 'user', content: 'Q1' },
+    { role: 'assistant', content: 'A1' },
+    { role: 'user', content: 'Q2' },
+  ]);
+  // Two members, two personas, same question: the comparison the + button is
+  // for. Only the system message differs.
+  const a = buildMemberHistory(entries, 0, undefined, 'Be terse.');
+  const b = buildMemberHistory(entries, 0, undefined, '');
+  assert.equal(a.length, b.length + 1);
+  assert.deepEqual(a.slice(1), b);
 });

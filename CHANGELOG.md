@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+**Council members can wear a persona, which is what the + button was always
+for.** A member is sent the bare prompt and nothing else, and that is still the
+default - it is what makes one member's answer comparable with another's. But
+it meant the only way a duplicated row could differ from its original was
+temperature, and there was no way at all to put two standing instructions
+against each other on the same question. Now each row has a persona picker in
+front of its temperature, so the same model can sit twice under two different
+prompts and be judged side by side by the consolidator. The persona brings its
+memories with it, layered exactly as in chat and roundtable, and the prompt
+size check counts them against that seat's window.
+
+**Roundtable and pipeline rows stopped pushing their last control past the
+border.** Both grids were declared a column short of the number of controls in
+the row, so "max out" was dealt the 30px slot meant for the remove button and
+hung outside the row, while the button itself wrapped onto a line of its own.
+It had been that way since max out was added and the templates were not grown
+to match. The seat-fit warning added last week was landing in the 32px colour
+column too, with its message running off the side; it now spans the row.
+
 **A persona stopped remembering facts and started remembering the act of
 summarising.** Told to record only what was new and to "say so in one line" if
 nothing was, a summariser wrote "no new information was shared" - and that got
