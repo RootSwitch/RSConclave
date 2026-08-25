@@ -165,7 +165,11 @@ const Chat = {
      */
     const pairingSel = el('select', {}, el('option', { value: '' }, ' - pairing - '),
       ...(App.presets.pairings ?? []).map((p) => el('option', { value: p.id }, p.name)));
-    this.setup = { endpoint, model, persona, system, message, temp, ctx, maxOut, errEl, sizeEl, fitEl, pairingSel };
+    // Says what picking a remembering persona actually commits you to, beside
+    // the control that does it - the same mark the sidebar uses on the
+    // sessions that result.
+    const personaNoteEl = el('span', { class: 'muted' });
+    this.setup = { endpoint, model, persona, system, message, temp, ctx, maxOut, errEl, sizeEl, fitEl, pairingSel, personaNoteEl };
 
     for (const ep of App.config.endpoints) endpoint.append(el('option', { value: ep.id }, ep.name));
     syncCtx(); // options exist now, so the kind is finally knowable
@@ -237,10 +241,24 @@ const Chat = {
         ctxField,
         el('label', {}, 'max out'), maxOut,
       ),
+      /*
+       * Persona on its own line, out of the fold it used to share with the
+       * system prompt. The two were collapsed together as "optional", which
+       * was true of the system prompt and stopped being true of the persona
+       * the moment memory existed: it is now the first choice in a
+       * memory-building chat, and the control that saves it sat two rows
+       * above the control that sets it.
+       */
+      el('div', { class: 'row' },
+        el('label', { title: 'The persona this chat wears. One that remembers carries its memories into every turn.' }, 'Persona'),
+        persona,
+        personaNoteEl,
+      ),
       el('details', {},
-        el('summary', {}, 'Persona & system prompt (optional)'),
+        el('summary', {}, 'System prompt (optional)'),
         el('div', { class: 'col' },
-          el('div', { class: 'row' }, el('label', {}, 'Persona'), persona),
+          el('span', { class: 'muted' },
+            'Free text layered after the persona and its memories, for this chat only.'),
           system,
         ),
       ),
@@ -265,6 +283,12 @@ const Chat = {
   refreshSetupFit() {
     const s = this.setup;
     if (!s || !s.sizeEl.isConnected) return;
+    const p = App.personas.find((x) => x.id === s.persona.value);
+    const remembers = p?.memories?.length ?? 0;
+    s.personaNoteEl.className = remembers ? 'sess-memory' : 'muted';
+    s.personaNoteEl.textContent = remembers
+      ? `◈ remembers ${remembers} ${remembers === 1 ? 'conversation' : 'conversations'} - this chat can add to that`
+      : '';
     const needed = estimateTokens(s.message.value) + estimateTokens(s.system.value);
     s.sizeEl.textContent = needed ? `about ${fmtK(needed)} tokens` : '';
     s.sizeEl.title = needed
