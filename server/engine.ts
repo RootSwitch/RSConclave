@@ -335,6 +335,18 @@ async function runTurn(a: Active, opts: {
   pushState();
 
   /*
+   * What to call an aborted turn. ONE function for every abort exit, because
+   * there are three of them and labelling only one is exactly the bug that
+   * shipped: Skip worked when the abort landed during a model load (the
+   * pending fetch rejects, the catch below runs) and stopped the whole
+   * council when it landed mid-stream - streamOllama catches the abort
+   * internally and returns cleanly, so that exit never reached the catch and
+   * carried a hardcoded 'cancelled' to the council loop. Reproduced against
+   * the real inference box, where mid-stream is where a Skip usually lands.
+   */
+  const abortLabel = () => (a.skipRequested ? 'skipped' as const : 'cancelled' as const);
+
+  /*
    * Measure the prompt against the model's real window (explicit num_ctx beats
    * the Modelfile's, which beats Ollama's server default).
    *
@@ -360,7 +372,7 @@ async function runTurn(a: Active, opts: {
    */
   if (a.abort.signal.aborted) {
     const stopped = opts.appendTo ?? addEntry({ ...opts.entrySeed, text: '' }, a);
-    stopped.error = 'cancelled';
+    stopped.error = abortLabel();
     a.abort = null;
     a.waitingFirstToken = false;
     persistOf(a);
@@ -403,7 +415,7 @@ async function runTurn(a: Active, opts: {
      * indistinguishable from a finished answer - no error, no marker, and a
      * missing token count as the only clue.
      */
-    entry.error = result.aborted ? 'cancelled'
+    entry.error = result.aborted ? abortLabel()
       : result.doneReason === 'incomplete' ? 'the stream ended before the model finished'
       : undefined;
   } catch (err: any) {
@@ -411,7 +423,7 @@ async function runTurn(a: Active, opts: {
       // Same abort, two different intentions - and the transcript should say
       // which, because "I gave up on this model" and "I stopped the run" read
       // very differently a week later.
-      entry.error = a.skipRequested ? 'skipped' : 'cancelled';
+      entry.error = abortLabel();
     } else {
       /*
        * A failed CONTINUE must not condemn the reply it was extending. The

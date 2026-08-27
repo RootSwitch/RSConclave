@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+**Skip pressed mid-answer no longer stops the whole council.** Skip worked
+when it landed while a model was still loading, and behaved exactly like
+Cancel when it landed while tokens were flowing - which is when it is usually
+pressed. The abort has three different exits inside a turn (the model-info
+fetch, a clean stream return, a thrown stream), and only one of them labelled
+the entry 'skipped'; the mid-stream exit returns cleanly from the provider
+layer and carried a hardcoded 'cancelled' straight to the council loop, which
+did what that label told it to and ended the run. All three exits now share
+one label. Reproduced and verified against a real inference box, and the
+probe that covers both windows plus Cancel now lives in the tree
+(dev/probe-skip.mjs) - its predecessor lived outside the repo, died with a
+session, and this is what its absence cost.
+
 **Council members can wear a persona, which is what the + button was always
 for.** A member is sent the bare prompt and nothing else, and that is still the
 default - it is what makes one member's answer comparable with another's. But
