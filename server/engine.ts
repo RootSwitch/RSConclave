@@ -11,6 +11,7 @@ import type {
   ChatConfig,
   CouncilConfig,
   CouncilMember,
+  Document,
   Endpoint,
   MemoryEntry,
   Persona,
@@ -28,6 +29,7 @@ import * as council from './council.ts';
 import * as pipeline from './pipeline.ts';
 import * as chat from './chat.ts';
 import * as mem from './memory.ts';
+import * as docs from './documents.ts';
 import { fillTemplate, renderSourceText, renderTranscriptText, stripThink } from './text.ts';
 import { estimateMessages, OLLAMA_DEFAULT_NUM_CTX } from './tokens.ts';
 import { broadcast } from './sse.ts';
@@ -68,6 +70,10 @@ function getPersonas(username: string): Persona[] {
   // Same fallback as the API route: a seat referencing a default persona
   // must resolve even if the user has never pressed Save on that page.
   return store.loadUser<Persona[]>(username, 'personas', DEFAULT_PERSONAS);
+}
+
+function getDocuments(username: string): Document[] {
+  return store.loadUser<Document[]>(username, 'documents', []);
 }
 
 /*
@@ -514,7 +520,7 @@ async function runCouncil(): Promise<void> {
     const entry = await runTurn(a, {
       member: m,
       messages: council.buildMemberHistory(a.session.entries, i, config.ballot,
-        council.buildMemberSystemPrompt(m, getPersonas(a.owner))),
+        council.buildMemberSystemPrompt(m, getPersonas(a.owner), getDocuments(a.owner), config.documentIds)),
       entrySeed: { kind: 'participant', speaker: m.model, model: m.model, memberIndex: i },
       keepAlive: config.unloadBetweenModels ? '0' : undefined,
     });
@@ -611,7 +617,7 @@ export function rerunMember(username: string, sessionId: string, memberIndex: nu
     await runTurn(a, {
       member: m,
       messages: council.buildMemberHistory(a.session.entries, memberIndex, config.ballot,
-        council.buildMemberSystemPrompt(m, getPersonas(username))),
+        council.buildMemberSystemPrompt(m, getPersonas(username), getDocuments(username), config.documentIds)),
       entrySeed: { kind: 'participant', speaker: m.model, model: m.model, memberIndex },
       keepAlive: config.unloadBetweenModels ? '0' : undefined,
     });
@@ -1136,7 +1142,7 @@ export function chatRegenerate(username: string): void {
 async function runChatTurn(): Promise<void> {
   const a = active!;
   const config = a.session.config as ChatConfig;
-  const messages = chat.buildChatMessages(config, a.session.entries, getPersonas(a.owner));
+  const messages = chat.buildChatMessages(config, a.session.entries, getPersonas(a.owner), getDocuments(a.owner));
   await runTurn(a, {
     member: { endpointId: config.endpointId, model: config.model, params: config.params },
     messages,
@@ -1336,7 +1342,7 @@ export function chatContinue(username: string): void {
     const forContext = last.error
       ? a.session.entries.map((e) => (e === last ? { ...e, error: undefined } : e))
       : a.session.entries;
-    const messages = chat.buildChatMessages(config, forContext, getPersonas(a.owner));
+    const messages = chat.buildChatMessages(config, forContext, getPersonas(a.owner), getDocuments(a.owner));
     messages.push({
       role: 'user',
       content:

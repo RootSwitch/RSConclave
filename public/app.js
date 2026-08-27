@@ -185,6 +185,68 @@ function personaTokens(personaId) {
   return estimateTokens(p.systemPrompt ?? '') + memory;
 }
 
+/** Rough token cost of a set of attached documents, framing included. */
+function documentTokens(ids) {
+  if (!ids?.length) return 0;
+  let total = 30; // the framing line
+  for (const id of ids) {
+    const d = App.documents.find((x) => x.id === id);
+    if (d?.text?.trim()) total += estimateTokens(d.text) + estimateTokens(d.name) * 2 + 16;
+  }
+  return total;
+}
+
+/**
+ * A fold of checkboxes for attaching reference material to a conversation.
+ * One builder for chat and council, so the two cannot drift - and a fold
+ * rather than a multi-select because a document's size belongs next to its
+ * name at the moment of attaching: the DIGEST is ~21k tokens, and choosing it
+ * should feel like choosing 21k tokens.
+ *
+ * getSelected/setSelected keep the state with the caller; onChange fires so
+ * the fit checks can recount.
+ */
+function documentsFold(state, onChange) {
+  if (!App.documents.length) return null; // no library yet - the fold would only say "go to Settings"
+  const boxes = App.documents.map((d) => {
+    const cb = el('input', { type: 'checkbox' });
+    cb.checked = state.ids.includes(d.id);
+    cb.onchange = () => {
+      state.ids = App.documents.filter((x) => (x.id === d.id ? cb.checked : state.ids.includes(x.id))).map((x) => x.id);
+      sync();
+      onChange?.();
+    };
+    return { d, cb };
+  });
+  const summary = el('summary', {}, 'Reference material');
+  const sync = () => {
+    const n = state.ids.length;
+    const tok = documentTokens(state.ids);
+    summary.textContent = n
+      ? `Reference material - ${n} attached, about ${fmtK(tok)} tokens on every turn`
+      : 'Reference material (optional)';
+  };
+  sync();
+  // A preset or clone rewrites state.ids from outside after the boxes were
+  // built; this puts the checkboxes back in agreement with it.
+  state.sync = () => {
+    for (const { d, cb } of boxes) cb.checked = state.ids.includes(d.id);
+    sync();
+  };
+  return el('details', {},
+    summary,
+    el('div', { class: 'col' },
+      el('span', { class: 'muted' },
+        'Attached documents ride with every turn of this conversation, verbatim. Manage the library in Settings.'),
+      ...boxes.map(({ d, cb }) => el('label', { class: 'row', style: 'gap: 6px' },
+        cb,
+        el('span', {}, d.name),
+        el('span', { class: 'prompt-size' }, `about ${fmtK(estimateTokens(d.text))} tokens`),
+      )),
+    ),
+  );
+}
+
 /**
  * Can this seat take a prompt of `needed` tokens? Three answers, because a
  * model has three different ceilings:
@@ -1141,6 +1203,7 @@ const App = {
   config: { endpoints: [] },
   personas: [],
   presets: { consolidatorTemplate: '', councils: [], roundtables: [] },
+  documents: [],
   modelsByEndpoint: {}, // endpointId -> string[] (lazy, cached)
   tagFilter: null,      // one tag at a time, or null for everything
   selecting: false,     // sidebar is in pick-several-to-delete mode
@@ -1912,10 +1975,11 @@ async function init() {
   };
 
   try {
-    [App.config, App.personas, App.presets] = await Promise.all([
+    [App.config, App.personas, App.presets, App.documents] = await Promise.all([
       Api.getConfig(),
       Api.getPersonas(),
       Api.getPresets(),
+      Api.getDocuments(),
     ]);
   } catch (err) {
     console.error('failed to load config', err);

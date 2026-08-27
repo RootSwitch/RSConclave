@@ -48,6 +48,23 @@ export interface Persona {
   memories?: MemoryEntry[];
 }
 
+/*
+ * A named piece of reference material - a design doc, a README, an app
+ * write-up - kept verbatim and attached to conversations by choice.
+ *
+ * Deliberately dumb: not a persona (it is material, not identity), not a
+ * memory (nothing distils it, nothing rewrites it), not editable per chat (a
+ * library entry that drifts per conversation stops being a library). The one
+ * thing it does is spare you re-pulling the same file into every
+ * conversation that needs it.
+ */
+export interface Document {
+  id: string;
+  name: string;
+  text: string;
+  addedAt: string;
+}
+
 export interface GenParams {
   temperature?: number;
   top_p?: number;
@@ -103,6 +120,14 @@ export interface CouncilConfig {
    * said yes" and the reasons they gave are useful for different things.
    */
   ballot?: string[];
+  /*
+   * Reference material every member is handed alongside the prompt. Unlike a
+   * persona this does not make answers incomparable - each member gets the
+   * SAME material, so it is part of the question rather than a difference
+   * between seats. The consolidator does not receive it: its input is the
+   * answers, and doubling a large document into that call buys nothing.
+   */
+  documentIds?: string[];
 }
 
 export interface RoundtableConfig {
@@ -159,6 +184,8 @@ export interface ChatConfig {
   model: string;
   personaId?: string; // base layer from personas.json
   systemPrompt?: string; // free text, layered after the persona
+  // Reference material attached to this conversation, sent with every turn.
+  documentIds?: string[];
   params?: GenParams;
   /*
    * The preset this chat was started from, if any. Recorded so the summarise

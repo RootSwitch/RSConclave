@@ -1,10 +1,11 @@
 // Plain 1:1 chat. The simplest mode: no speaker labels, no turn order -
 // just the transcript mapped straight onto user/assistant roles.
-import type { ChatConfig, ChatMessage, Persona, TranscriptEntry } from './types.ts';
+import type { ChatConfig, ChatMessage, Document, Persona, TranscriptEntry } from './types.ts';
 import { isFinishedTurn, stripThink } from './text.ts';
 import { renderMemoryLayer } from './memory.ts';
+import { renderDocumentsLayer } from './documents.ts';
 
-export function buildSystemPrompt(config: ChatConfig, personas: Persona[]): string {
+export function buildSystemPrompt(config: ChatConfig, personas: Persona[], documents: Document[] = []): string {
   const layers: string[] = [];
   const persona = config.personaId ? personas.find((p) => p.id === config.personaId) : undefined;
   if (persona?.systemPrompt.trim()) layers.push(persona.systemPrompt.trim());
@@ -15,6 +16,11 @@ export function buildSystemPrompt(config: ChatConfig, personas: Persona[]): stri
     if (memory) layers.push(memory);
   }
   if (config.systemPrompt?.trim()) layers.push(config.systemPrompt.trim());
+  // Reference material goes LAST: it is the largest layer and pure content,
+  // and the instructions above it (persona, session prompt) should not have
+  // to compete with a 20k-token document for the model's attention.
+  const docs = renderDocumentsLayer(config.documentIds, documents);
+  if (docs) layers.push(docs);
   return layers.join('\n\n');
 }
 
@@ -22,9 +28,10 @@ export function buildChatMessages(
   config: ChatConfig,
   entries: TranscriptEntry[],
   personas: Persona[],
+  documents: Document[] = [],
 ): ChatMessage[] {
   const messages: ChatMessage[] = [];
-  const system = buildSystemPrompt(config, personas);
+  const system = buildSystemPrompt(config, personas, documents);
   if (system) messages.push({ role: 'system', content: system });
 
   for (const e of entries) {

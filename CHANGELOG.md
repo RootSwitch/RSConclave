@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+**A document library, so the same file stops being re-pulled into every
+conversation.** Testing the memory persona meant pasting the same DIGEST.md
+into chat after chat - the friction was never attaching it, it was going to
+get it. **Documents** in Settings holds named verbatim texts (paste, or load
+straight from a file); a **Reference material** fold in the chat and council
+setup forms attaches them, showing each document's token cost at the moment of
+choosing, because attaching the DIGEST should feel like attaching 21k tokens.
+Attached material rides every turn as a fenced block after every other layer,
+framed as material to draw on rather than instructions - and it can never leak
+into a summary, for the same structural reason a persona's memory cannot: it
+is config, not a transcript entry, so {{TRANSCRIPT}} and {{SOURCE}} have
+nothing to carry. In a council every member gets the same material (part of
+the question, not a difference between seats - answers stay comparable) and
+the consolidator gets none of it, since its input is the answers. The fit
+markers count attached documents, so a 4k seat goes amber the moment a 5k
+document lands on it, and the pipeline's input box gains insert buttons - a
+document into stage 1 is the clean route to a persona memory. Deliberately
+dumb throughout: not a persona, not a memory, not editable per conversation.
+A library entry that drifts per chat stops being a library.
+
 **Skip pressed mid-answer no longer stops the whole council.** Skip worked
 when it landed while a model was still loading, and behaved exactly like
 Cancel when it landed while tokens were flowing - which is when it is usually

@@ -1,8 +1,9 @@
 // Council mode: transcript assembly and consolidator prompt templating.
-import type { ChatMessage, CouncilConfig, CouncilMember, Persona, TranscriptEntry } from './types.ts';
+import type { ChatMessage, CouncilConfig, CouncilMember, Document, Persona, TranscriptEntry } from './types.ts';
 import { incompleteNote, isFinishedTurn, stripThink } from './text.ts';
 import { ballotInstruction } from './vote.ts';
 import { renderMemoryLayer } from './memory.ts';
+import { renderDocumentsLayer } from './documents.ts';
 
 /**
  * A member's standing instructions: its persona, and whatever that persona
@@ -12,13 +13,16 @@ import { renderMemoryLayer } from './memory.ts';
  * Empty for a member with no persona, which is every member unless you say
  * otherwise - a council's default is still the bare prompt.
  */
-export function buildMemberSystemPrompt(member: CouncilMember, personas: Persona[]): string {
+export function buildMemberSystemPrompt(member: CouncilMember, personas: Persona[], documents: Document[] = [], documentIds?: string[]): string {
   const persona = member.personaId ? personas.find((p) => p.id === member.personaId) : undefined;
-  if (!persona) return '';
   const layers: string[] = [];
-  if (persona.systemPrompt.trim()) layers.push(persona.systemPrompt.trim());
-  const memory = renderMemoryLayer(persona);
+  if (persona?.systemPrompt.trim()) layers.push(persona.systemPrompt.trim());
+  const memory = persona ? renderMemoryLayer(persona) : '';
   if (memory) layers.push(memory);
+  // Shared material is part of the QUESTION, not a difference between seats:
+  // every member gets the same documents, so answers stay comparable.
+  const docs = renderDocumentsLayer(documentIds, documents);
+  if (docs) layers.push(docs);
   return layers.join('\n\n');
 }
 

@@ -153,6 +153,8 @@ const Chat = {
      * marker rather than a list, but the arithmetic is the app's job either
      * way. Counts the system prompt too, since that is sent with every turn.
      */
+    // Attached reference material for this chat; the fold below owns the UI.
+    const docState = { ids: [] };
     const sizeEl = el('span', { class: 'prompt-size' });
     const fitEl = el('span', { class: 'fit-tag' });
     /*
@@ -168,7 +170,7 @@ const Chat = {
     // the control that does it - the same mark the sidebar uses on the
     // sessions that result.
     const personaNoteEl = el('span', { class: 'muted' });
-    this.setup = { endpoint, model, persona, system, message, temp, ctx, maxOut, errEl, sizeEl, fitEl, presetSel, personaNoteEl };
+    this.setup = { endpoint, model, persona, system, message, temp, ctx, maxOut, errEl, sizeEl, fitEl, presetSel, personaNoteEl, docState };
 
     for (const ep of App.config.endpoints) endpoint.append(el('option', { value: ep.id }, ep.name));
     syncCtx(); // options exist now, so the kind is finally knowable
@@ -253,6 +255,7 @@ const Chat = {
         persona,
         personaNoteEl,
       ),
+      documentsFold(docState, () => this.refreshSetupFit()),
       el('details', {},
         el('summary', {}, 'System prompt (optional)'),
         el('div', { class: 'col' },
@@ -288,7 +291,7 @@ const Chat = {
     s.personaNoteEl.textContent = remembers
       ? `◈ remembers ${remembers} ${remembers === 1 ? 'conversation' : 'conversations'} - this chat can add to that`
       : '';
-    const needed = estimateTokens(s.message.value) + estimateTokens(s.system.value);
+    const needed = estimateTokens(s.message.value) + estimateTokens(s.system.value) + documentTokens(s.docState.ids);
     s.sizeEl.textContent = needed ? `about ${fmtK(needed)} tokens` : '';
     s.sizeEl.title = needed
       ? 'Message plus system prompt, roughly, at four characters per token. A persona with memories adds more that this form cannot see.'
@@ -328,6 +331,7 @@ const Chat = {
         personaId: s.persona.value || undefined,
         systemPrompt: s.system.value.trim() || undefined,
         params: genParams(s.temp.value, s.ctx.value, s.maxOut.value),
+        documentIds: s.docState.ids.length ? s.docState.ids : undefined,
         // Recorded so the summarise fold can offer the same summariser again.
         presetId: s.presetSel.value || undefined,
       }));

@@ -76,6 +76,23 @@ const Pipeline = {
         presetDeleteButton(() => this.presetSel, 'pipelines'),
       ),
       this.inputEl,
+      /*
+       * The library, feeding the distillation flow: a document as stage 1's
+       * input is the clean way to turn reference material into a persona
+       * memory, and this spares the copy-paste round trip through Settings.
+       * Insertion, not attachment - the input stays editable text, and the
+       * pipeline records what was actually sent rather than a document id
+       * whose library entry can change after the fact.
+       */
+      App.documents.length ? el('div', { class: 'row' },
+        el('span', { class: 'muted' }, 'insert a document:'),
+        ...App.documents.map((d) => el('button', { class: 'mini',
+          title: `about ${fmtK(estimateTokens(d.text))} tokens`,
+          onclick: () => {
+            this.inputEl.value = this.inputEl.value.trim() ? this.inputEl.value + '\n\n' + d.text : d.text;
+            this.inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+          } }, d.name)),
+      ) : null,
       el('label', {}, 'Stages (run in order; each template gets the previous output as {{INPUT}})'),
       rowsWrap,
       el('button', { onclick: () => this.addStageRow(rowsWrap) }, '+ add stage'),

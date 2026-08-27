@@ -136,6 +136,7 @@ const Council = {
      * afterwards, and work backwards - which is a whole run to answer a
      * question the app could answer while you type.
      */
+    const docState = { ids: [] };
     const promptSizeEl = el('span', { class: 'prompt-size' });
     const fitSummaryEl = el('span', { class: 'muted' });
     const consolidatorFitEl = el('span', { class: 'fit-tag' });
@@ -146,7 +147,7 @@ const Council = {
 
     this.form = { promptEl, consolidatorSel, templateEl, unloadEl, ballotEl, consolidateEl, consolidatorCtxEl,
       consolidatorMaxOutEl, syncConsolidatorCtx, errEl, memberRows: [], modelListEl,
-      promptSizeEl, fitSummaryEl, consolidatorFitEl, fitBtn };
+      promptSizeEl, fitSummaryEl, consolidatorFitEl, fitBtn, docState };
 
     // Cheap enough to run on every keystroke: the estimate is a length read,
     // and the row loop is as long as the model list.
@@ -197,6 +198,7 @@ const Council = {
       ),
       promptEl,
       el('div', { class: 'row' }, promptSizeEl, fitSummaryEl, el('span', { class: 'grow' }), fitBtn),
+      documentsFold(docState, () => this.refreshFit()),
       el('label', {}, 'Council members (queried in order, one at a time - ＋ adds the same model again, e.g. at another temperature)'),
       modelListEl,
       el('div', { class: 'row' },
@@ -296,7 +298,7 @@ const Council = {
   refreshFit() {
     const f = this.form;
     if (!f) return;
-    const needed = estimateTokens(f.promptEl.value);
+    const needed = estimateTokens(f.promptEl.value) + documentTokens(f.docState.ids);
     f.promptSizeEl.textContent = needed ? `about ${fmtK(needed)} tokens` : '';
     f.promptSizeEl.title = needed
       ? 'Rough estimate at four characters per token. Markdown, code and JSON pack more tokens per character than prose, so treat this as a floor.'
@@ -445,6 +447,7 @@ const Council = {
         template: f.templateEl.value,
         params: genParams(undefined, f.consolidatorCtxEl.value, f.consolidatorMaxOutEl.value),
       },
+      documentIds: f.docState.ids.length ? f.docState.ids : undefined,
       unloadBetweenModels: f.unloadEl.checked,
       skipConsolidation: f.consolidateEl.checked ? undefined : true,
       // One option is not a ballot, it is a leading question - so anything under
@@ -504,6 +507,8 @@ const Council = {
     f.consolidatorCtxEl.value = config.consolidator.params?.num_ctx ?? '';
     f.unloadEl.checked = !!config.unloadBetweenModels;
     f.ballotEl.value = (config.ballot ?? []).join(', ');
+    f.docState.ids = (config.documentIds ?? []).filter((id) => App.documents.some((d) => d.id === id));
+    f.docState.sync?.();
     // A preset or clone changes which seats are checked and what windows they
     // carry, and neither fires an input event.
     this.refreshFit();

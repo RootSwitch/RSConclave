@@ -50,6 +50,8 @@ const Api = {
   putConfig: (cfg) => Api._put('/api/config', cfg),
   getPersonas: () => Api._json('/api/personas'),
   putPersonas: (list) => Api._put('/api/personas', list),
+  getDocuments: () => Api._json('/api/documents'),
+  putDocuments: (list) => Api._put('/api/documents', list),
   getPresets: () => Api._json('/api/presets'),
   putPresets: (p) => Api._put('/api/presets', p),
   getModels: (endpointId) => Api._json(`/api/models?endpointId=${encodeURIComponent(endpointId)}`),

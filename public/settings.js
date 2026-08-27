@@ -11,7 +11,7 @@ const Settings = {
     scroll.append(el('h3', { class: 'view-title' }, 'Settings'));
     // Personas last: it is the one block that grows without bound, so
     // everything fixed-size stays reachable without scrolling past it.
-    scroll.append(this.buildAccount(), this.buildUsers(), this.buildEndpoints(), this.buildPersonas());
+    scroll.append(this.buildAccount(), this.buildUsers(), this.buildEndpoints(), this.buildPersonas(), this.buildDocuments());
     this.root.append(scroll);
   },
 
@@ -409,4 +409,104 @@ const Settings = {
       rowsWrap,
     );
   },
+
+  /* ---------- documents ---------- */
+
+  /*
+   * The reference library: named verbatim texts attached to conversations
+   * from the chat and council setup forms. Deliberately dumb - not a persona
+   * (material, not identity), not a memory (nothing distils or rewrites it),
+   * not editable per chat (a library entry that drifts per conversation stops
+   * being a library). Its one job is sparing you re-pulling the same file
+   * into every conversation that needs it.
+   */
+  buildDocuments() {
+    const rowsWrap = el('div', { class: 'col' });
+    const rows = [];
+
+    const addRow = (d) => {
+      const els = {
+        name: el('input', { placeholder: 'Document name (e.g. RSCanvas DIGEST)', value: d?.name ?? '', style: 'flex: 1' }),
+        text: el('textarea', { rows: 6, placeholder: 'Paste the document, or load it from a file…' }, d?.text ?? ''),
+      };
+      const id = d?.id ?? 'doc' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const rowObj = { id, els, addedAt: d?.addedAt ?? new Date().toISOString() };
+
+      const title = el('span', { class: 'persona-title' });
+      const size = el('span', { class: 'prompt-size' });
+      const syncSummary = () => {
+        title.textContent = els.name.value.trim() || '(unnamed document)';
+        const tok = estimateTokens(els.text.value);
+        size.textContent = tok ? `about ${fmtK(tok)} tokens` : '';
+      };
+      els.name.addEventListener('input', syncSummary);
+      els.text.addEventListener('input', syncSummary);
+      syncSummary();
+
+      /*
+       * Straight from disk, because the whole point is a file like DIGEST.md
+       * that lives in a repo: pull it once here instead of once per chat.
+       * Re-loading the same file later is how an updated document gets
+       * refreshed - the library stores text, not a path, so nothing tracks
+       * the file behind your back.
+       */
+      const fileBtn = el('button', { class: 'mini', title: 'Load a text file into this document, replacing its text.', onclick: (ev) => {
+        ev.preventDefault();
+        const input = el('input', { type: 'file', accept: '.md,.txt,.text,.markdown,text/*' });
+        input.onchange = () => {
+          const f = input.files?.[0];
+          if (!f) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            els.text.value = String(reader.result ?? '');
+            if (!els.name.value.trim()) els.name.value = f.name.replace(/[.](md|txt|text|markdown)$/i, '');
+            syncSummary();
+          };
+          reader.readAsText(f);
+        };
+        input.click();
+      } }, 'load file');
+
+      const delBtn = el('button', { class: 'danger mini', title: 'Remove this document (press Save to keep the change)', onclick: (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        rows.splice(rows.indexOf(rowObj), 1);
+        row.remove();
+      } }, '✕');
+
+      const row = el('details', { class: 'persona-row' },
+        el('summary', {}, title, size, el('span', { class: 'grow' }), fileBtn, delBtn),
+        el('div', { class: 'col' },
+          el('div', { class: 'row' }, el('label', {}, 'Name'), els.name),
+          els.text));
+      if (!d) row.open = true;
+      rowsWrap.append(row);
+      rows.push(rowObj);
+    };
+
+    const saveBtn = el('button', { class: 'primary' }, 'Save');
+    const save = async () => {
+      const documents = rows
+        .filter((r) => r.els.name.value.trim() && r.els.text.value.trim())
+        .map((r) => ({ id: r.id, name: r.els.name.value.trim(), text: r.els.text.value, addedAt: r.addedAt }));
+      await Api.putDocuments(documents);
+      App.documents = documents;
+      saveBtn.textContent = 'Saved ✓';
+      setTimeout(() => { saveBtn.textContent = 'Save'; }, 1600);
+    };
+    saveBtn.onclick = () => save().catch((e) => alert(e.message));
+
+    for (const d of App.documents) addRow(d);
+
+    return el('div', { class: 'settings-block' },
+      el('div', { class: 'row' },
+        el('label', {}, 'Documents (reference material to attach to conversations)'),
+        el('span', { class: 'grow' }),
+        el('button', { onclick: () => addRow() }, '+ add document'),
+        saveBtn,
+      ),
+      rowsWrap,
+    );
+  },
+
 };

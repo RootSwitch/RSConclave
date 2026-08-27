@@ -485,6 +485,18 @@ is working material.
 One memory per document, rather than one chat covering everything: each entry then carries the
 document it came from, and a fact that turns out to be wrong can be deleted on its own.
 
+#### The document library
+
+For material you want verbatim rather than distilled, **Documents** in Settings holds named
+reference texts - paste one in or load it from a file - and a **Reference material** fold in the
+chat and council setup forms attaches them to a conversation. Attached documents ride every turn
+as a fenced block, with their token cost shown at the moment of choosing, counted by the fit
+markers, and structurally invisible to the summariser (config, not transcript). In a council,
+every member receives the same material and the consolidator receives none. The pipeline input
+box gets insert buttons for the library, which is the clean route from a document to a persona
+memory. The library is deliberately dumb: verbatim text under a name, attach and detach, nothing
+else - memory is what you distil, documents are what you keep whole.
+
 #### Presets, forks, and what the app refuses to remember
 
 Building a memory means the same persona, the same model and the same summariser over and over.

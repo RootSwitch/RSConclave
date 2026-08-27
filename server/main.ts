@@ -16,7 +16,7 @@ import * as chat from './chat.ts';
 import * as auth from './auth.ts';
 import { sessionToMarkdown } from './exportMd.ts';
 import { searchSessions } from './search.ts';
-import type { AppConfig, Persona, Presets, Session } from './types.ts';
+import type { AppConfig, Document, Persona, Presets, Session } from './types.ts';
 import {
   DEFAULT_COMPACT_TEMPLATE,
   DEFAULT_CONSOLIDATOR_TEMPLATE,
@@ -285,6 +285,22 @@ route('POST', '/api/personas/:id/compact', async (req, res, params) => {
     String(template ?? DEFAULT_COMPACT_TEMPLATE),
   );
   sendJson(res, 200, { sessionId });
+});
+
+// --- documents (per-user reference material, attached to conversations) ---
+route('GET', '/api/documents', (req, res) => {
+  sendJson(res, 200, store.loadUser<Document[]>(userOf(req), 'documents', []));
+});
+route('PUT', '/api/documents', async (req, res) => {
+  const body = await readJsonBody(req, BIG_BODY); // documents are the big payload by design
+  if (!Array.isArray(body)) throw new HttpError(400, 'expected an array of documents');
+  for (const d of body) {
+    if (!d || typeof d !== 'object' || typeof d.id !== 'string' || typeof d.name !== 'string' || typeof d.text !== 'string') {
+      throw new HttpError(400, 'each document needs an id, a name and text');
+    }
+  }
+  store.saveUser(userOf(req), 'documents', body);
+  sendJson(res, 200, { ok: true });
 });
 
 route('GET', '/api/presets', (req, res) => {
@@ -709,7 +725,7 @@ route('POST', '/api/chat/summarize', async (req, res) => {
 route('POST', '/api/chat/system-prompt', async (req, res) => {
   const config = await readJsonBody(req);
   const personas = store.loadUser<Persona[]>(userOf(req), 'personas', DEFAULT_PERSONAS);
-  sendJson(res, 200, { prompt: chat.buildSystemPrompt(config ?? {}, personas) });
+  sendJson(res, 200, { prompt: chat.buildSystemPrompt(config ?? {}, personas, store.loadUser<Document[]>(userOf(req), 'documents', [])) });
 });
 
 // --- pipeline ---
