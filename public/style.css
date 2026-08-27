@@ -148,6 +148,8 @@ body.resizing-sidebar { user-select: none; cursor: col-resize; }
     white-space: nowrap;
 }
 .nav-btn.selected { background: var(--se-active); border-color: var(--se-active); color: #fff; }
+/* No user here since Settings moved up beside Import, but the RSOperator fork
+   pins its Quit row with this - deleting it would hand the fork a conflict. */
 .nav-bottom { margin-top: auto; }
 
 #main { flex: 1; overflow: hidden; display: flex; min-width: 0; }
