@@ -22,6 +22,15 @@ document into stage 1 is the clean route to a persona memory. Deliberately
 dumb throughout: not a persona, not a memory, not editable per conversation.
 A library entry that drifts per chat stops being a library.
 
+An empty library now says so where the control would be, rather than
+rendering nothing. Hiding it entirely was meant to spare you a line that only
+said "go to Settings", but it left the one case that mattered indistinguishable
+from a stale install: someone who knows the feature exists, cannot find it, and
+has no way to tell "you have no documents" from "you have the wrong build". The
+chat, council and pipeline setup forms carry a muted line and a button straight
+to Settings, matching how personas already behave, and both disappear for good
+once a document exists.
+
 **Skip pressed mid-answer no longer stops the whole council.** Skip worked
 when it landed while a model was still loading, and behaved exactly like
 Cancel when it landed while tokens were flowing - which is when it is usually

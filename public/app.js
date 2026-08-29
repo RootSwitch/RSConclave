@@ -207,7 +207,22 @@ function documentTokens(ids) {
  * the fit checks can recount.
  */
 function documentsFold(state, onChange) {
-  if (!App.documents.length) return null; // no library yet - the fold would only say "go to Settings"
+  /*
+   * An empty library used to render nothing at all, on the reasoning that the
+   * fold would only say "go to Settings". That reasoning was wrong in the one
+   * case it mattered: someone who knows the feature exists and cannot find the
+   * control has no way to tell "you have no documents" from "you are running
+   * an old build". So the empty state says which, and offers the way out.
+   * Personas already work this way (the picker renders empty, and saving a
+   * memory says "add one in Settings first"), so this is also the two halves
+   * of the app agreeing. It disappears for good after the first document.
+   */
+  if (!App.documents.length) {
+    return el('div', { class: 'row' },
+      el('span', { class: 'muted' }, 'No reference material in the library yet.'),
+      el('button', { class: 'mini', onclick: () => { Settings.mount(); showView('settings'); } }, 'Add one in Settings'),
+    );
+  }
   const boxes = App.documents.map((d) => {
     const cb = el('input', { type: 'checkbox' });
     cb.checked = state.ids.includes(d.id);
