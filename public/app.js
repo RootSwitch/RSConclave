@@ -122,12 +122,128 @@ function entryComplete(entry, isStreamingNow = false) {
   return !isStreamingNow;
 }
 
+/*
+ * Elapsed time is wall clock, because "how long did I wait" is the honest
+ * answer to that. The RATE is computed from the provider's own generation
+ * time where it gave one: a cold model charges its load against the first
+ * turn, so 80 tokens after a 6-second load reported 12 tok/s for a model
+ * generating at 79 - and every conversation then looked like it sped up.
+ */
 function statsLine(stats) {
   if (!stats || stats.durationMs === undefined) return '';
   const secs = stats.durationMs / 1000;
   let s = `${stats.evalCount ?? '?'} tok · ${secs.toFixed(1)}s`;
-  if (stats.evalCount && secs > 0) s += ` · ${(stats.evalCount / secs).toFixed(1)} tok/s`;
+  const rate = rateOf(stats);
+  if (rate) s += ` · ${rate.toFixed(1)} tok/s`;
   return s;
+}
+
+/** Tokens per second for one turn, load time excluded where the provider says. */
+function rateOf(stats) {
+  const n = stats?.evalCount;
+  if (!n) return null;
+  const ms = stats.evalDurationMs ?? stats.durationMs;
+  return ms > 0 ? n / (ms / 1000) : null;
+}
+
+/**
+ * Generation rate per model turn, oldest first. Only turns that actually
+ * generated: a skipped, cancelled or errored entry has no rate, and carrying a
+ * zero for it would draw a cliff that never happened.
+ */
+function turnRates(session) {
+  const out = [];
+  for (const e of session?.entries ?? []) {
+    if (e.kind !== 'participant' && e.kind !== 'consolidation') continue;
+    const rate = rateOf(e.stats);
+    if (!rate) continue;
+    out.push({ rate, speaker: e.speaker, tokens: e.stats.evalCount });
+  }
+  return out;
+}
+
+/*
+ * A sparkline of tokens/sec across a conversation's turns.
+ *
+ * This is not decoration. A rate that halves partway through a conversation is
+ * the visible symptom of a context window the card cannot actually hold: as
+ * the transcript grows, Ollama spills layers to system RAM and throughput
+ * collapses. On a 24 GB card that showed up as 60 t/s falling to 15 - a change
+ * you feel long before you would think to go looking for it, and one that no
+ * single turn's number makes obvious.
+ *
+ * Inline SVG rather than a canvas or a library: it scales with the theme's
+ * font colour, costs no dependency, and the whole drawing is a dozen numbers.
+ */
+function rateSparkline(session) {
+  const rates = turnRates(session);
+  // Two points is a line segment - it has a slope but no shape, and reading a
+  // trend from it would be inviting a conclusion the data cannot support.
+  if (rates.length < 3) return null;
+
+  const vals = rates.map((r) => r.rate);
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  const W = 96, H = 18, PAD = 2;
+  /*
+   * Baselined at zero, not at the minimum.
+   *
+   * Scaling to min-max makes every sparkline fill the box, so a conversation
+   * holding 88.2 to 89.2 tok/s drew a violent zigzag while the tooltip beside
+   * it said "Steady". For a RATE, zero is a real quantity and proportion is the
+   * thing being read: flat should look flat, and the 60-to-15 collapse this
+   * exists to reveal still falls three quarters of the way down the box.
+   */
+  const top = max * 1.1 || 1;
+  const x = (i) => PAD + (i * (W - 2 * PAD)) / (vals.length - 1);
+  const y = (v) => H - PAD - (v / top) * (H - 2 * PAD);
+  const points = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+
+  /*
+   * "Slower" compares the last few turns with the first few rather than last
+   * against first: a single unlucky turn should not label a conversation as
+   * degrading, and a single fast one should not hide that it is.
+   */
+  const head = vals.slice(0, Math.min(3, vals.length));
+  const tail = vals.slice(-Math.min(3, vals.length));
+  const avg = (a) => a.reduce((s, v) => s + v, 0) / a.length;
+  const drop = 1 - avg(tail) / avg(head);
+  const degraded = drop >= 0.35;
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', String(W));
+  svg.setAttribute('height', String(H));
+  svg.setAttribute('class', 'rate-spark' + (degraded ? ' degraded' : ''));
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  line.setAttribute('points', points);
+  line.setAttribute('fill', 'none');
+  line.setAttribute('stroke', 'currentColor');
+  line.setAttribute('stroke-width', '1.5');
+  line.setAttribute('stroke-linejoin', 'round');
+  line.setAttribute('stroke-linecap', 'round');
+  svg.append(line);
+  // The last turn marked, because "where is it now" is the question being asked.
+  const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  dot.setAttribute('cx', x(vals.length - 1).toFixed(1));
+  dot.setAttribute('cy', y(vals[vals.length - 1]).toFixed(1));
+  dot.setAttribute('r', '2');
+  dot.setAttribute('fill', 'currentColor');
+  svg.append(dot);
+
+  const label = el('span', { class: 'muted' },
+    `${vals[vals.length - 1].toFixed(0)} tok/s`);
+  const wrap = el('span', {
+    class: 'row rate-spark-wrap',
+    style: 'gap: 5px',
+    title: `Generation rate over ${vals.length} turns, oldest first.\n`
+      + `high ${max.toFixed(1)}, low ${min.toFixed(1)} tok/s\n`
+      + (degraded
+        ? `Down ${Math.round(drop * 100)}% from the opening turns. On a local model that usually means `
+          + `the context has grown past what the card holds, and layers are spilling to system RAM.`
+        : 'Steady.'),
+  }, svg, label);
+  return wrap;
 }
 
 /** 4096 → "4k", 262144 → "256k", 1200 → "1.2k" */

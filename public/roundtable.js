@@ -49,6 +49,11 @@ const Roundtable = {
          * any owned session), so the guard was wrong, not the bar.
          */
         !App.isActiveSession() ? resumeButton(session.id) : null,
+        el('span', { class: 'grow' }),
+        // A roundtable is where this matters most: several models take turns
+        // on one growing transcript, so the rate falling is the first sign that
+        // the shared context has outgrown somebody's card.
+        rateSparkline(session),
       ),
       this.buildBrief(session),
       this.buildJudgeSection(session),

@@ -773,3 +773,10 @@ details.think .think-body {
     .endpoint-row { grid-template-columns: 1fr 1fr; }
     .participant-row, .stage-row { grid-template-columns: 1fr 1fr; }
 }
+
+/* Tokens/sec across a conversation's turns. Colour comes from currentColor so
+   the line follows the theme; the degraded state borrows the same amber the
+   fit markers use for "this will work but not comfortably". */
+.rate-spark-wrap { color: var(--se-txt-dim); }
+.rate-spark { display: block; overflow: visible; }
+.rate-spark-wrap:has(.degraded) { color: var(--se-warn); }

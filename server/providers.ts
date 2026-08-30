@@ -296,6 +296,14 @@ async function streamOllama(args: StreamChatArgs): Promise<StreamResult> {
   let text = '';
   let first = true;
   let evalCount: number | undefined;
+  /*
+   * Ollama's own generation time, excluding the model load. durationMs
+   * below is wall clock, so on a cold model it charges a 6-second load
+   * against 80 tokens and reports 12 tok/s for a model that generates at
+   * 79. That is fine as "how long did this turn take" and wrong as a
+   * RATE - and the rate is what a falling trend is read from.
+   */
+  let evalDurationMs: number | undefined;
   let doneReason: string | undefined;
   let aborted = false;
   const push = (delta: string) => {
@@ -318,6 +326,8 @@ async function streamOllama(args: StreamChatArgs): Promise<StreamResult> {
       if (obj.done) {
         sawDone = true;
         evalCount = obj.eval_count;
+        // Nanoseconds on the wire.
+        if (typeof obj.eval_duration === 'number') evalDurationMs = obj.eval_duration / 1e6;
         // 'length' means it stopped because num_predict ran out, not because it
         // had finished - which is the difference the Continue button needs.
         doneReason = typeof obj.done_reason === 'string' ? obj.done_reason : undefined;
@@ -349,7 +359,7 @@ async function streamOllama(args: StreamChatArgs): Promise<StreamResult> {
    * from the outside - no error, no marker, no token count.
    */
   if (!sawDone && !aborted) doneReason = 'incomplete';
-  return { text, stats: { evalCount, durationMs: Date.now() - started }, aborted, doneReason };
+  return { text, stats: { evalCount, evalDurationMs, durationMs: Date.now() - started }, aborted, doneReason };
 }
 
 async function streamOpenAi(args: StreamChatArgs): Promise<StreamResult> {

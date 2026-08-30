@@ -155,6 +155,14 @@ export interface EntryStats {
   promptTokensEst?: number;
   evalCount?: number;
   durationMs?: number;
+  /*
+   * Generation time as the provider reports it, excluding the model
+   * load. durationMs is wall clock and therefore charges a cold start
+   * against the first turn: 80 tokens after a 6-second load reads as 12
+   * tok/s for a model generating at 79. Rates are computed from this
+   * where it exists, so a trend is a trend rather than a load artifact.
+   */
+  evalDurationMs?: number;
 }
 
 export interface TranscriptEntry {

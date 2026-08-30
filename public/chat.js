@@ -34,6 +34,10 @@ const Chat = {
         el('a', { href: `/api/sessions/${session.id}`, target: '_blank' }, el('button', {}, 'View JSON')),
         cloneButton(session),
         !App.isActiveSession() ? resumeButton(session.id) : null,
+        el('span', { class: 'grow' }),
+        // Rebuilt on every mount, which is every completed turn, so it grows
+        // with the conversation rather than being a snapshot of when it opened.
+        rateSparkline(session),
       ),
       this.buildBrief(session),
       // Kept on `this` so the bottom bar's Summarise button can open it; on a

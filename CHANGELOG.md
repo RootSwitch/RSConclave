@@ -31,6 +31,25 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**A tokens/sec sparkline on chat and roundtable headers.** A rate that halves
+partway through a conversation is the visible symptom of a context window the
+card cannot actually hold - as the transcript grows, layers spill to system RAM
+and throughput collapses. That is a change you feel long before you would think
+to go looking for it, and no single turn's number makes it obvious. Three turns
+minimum, because two points have a slope but no shape. Hovering gives the high,
+the low, and whether the last few turns are down on the opening ones; a drop of
+a third or more turns the line amber and says what usually causes it.
+
+**Token rates now exclude model load time.** `durationMs` is wall clock, so a
+cold model charged its load against the first turn: 80 tokens after a 6-second
+load reported 12 tok/s for a model generating at 88. Every conversation
+therefore looked like it sped up, and a real decline would have been masked by
+it. Ollama reports `eval_duration` separately and it is now kept, so elapsed
+time stays wall clock - that is the honest answer to "how long did I wait" -
+while the RATE is the provider's own. Measured on the same five turns: 16.8,
+79.3, 80.7, 79.8, 79.6 by wall clock against a true 88.2, 88.2, 89.2, 89.0,
+88.5.
+
 **The recommended num_ctx is now verified by loading at it, not extrapolated
 to.** Two probes at 2k and 8k give a straight line, and on real hardware that
 line over-promises badly: on a 24 GB 7900XTX it recommended 176128 for
