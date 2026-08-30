@@ -61,6 +61,7 @@ const Api = {
   // off client-side would abandon work the box is still doing.
   measureCtx: (endpointId, model, assumeEmpty) =>
     Api._post('/api/measure-ctx', { endpointId, model, assumeEmpty }),
+  cancelMeasure: () => Api._post('/api/measure-ctx/cancel', {}),
   applyNumCtx: (endpointId, model, numCtx) =>
     Api._post('/api/measure-ctx/apply', { endpointId, model, numCtx }),
 

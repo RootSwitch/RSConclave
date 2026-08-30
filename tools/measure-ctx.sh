@@ -231,6 +231,31 @@ probe() { # $1 = num_ctx -> prints "total_bytes vram_bytes"
 TRAINED=$(curl -sf -m 30 -X POST "$HOST/api/show" -H 'content-type: application/json'     -d "{\"model\":\"$MODEL\"}" | grep -o '"[^"]*\.context_length":[0-9]*' | head -1 | grep -o '[0-9]*$')
 [ -n "$TRAINED" ] || TRAINED=0
 
+# Refuse to load something that provably cannot fit. Weights occupy at least
+# what they occupy on disk, so /api/tags settles the hopeless cases for the
+# price of one GET - before anything is read into memory. Loading them anyway
+# is not a slow measurement: it is the box paging itself into the ground for
+# several minutes to discover what the file listing already said.
+#
+# Only clear-cut cases are refused. The disk size is a LOWER bound, so a model
+# that merely looks tight is still measured - those are the interesting ones.
+DISK=$(curl -sf -m 20 "$HOST/api/tags" 2>/dev/null | sed 's/{"name":/\n&/g' |
+    grep -F "\"$PS_NAME\"" | head -1 | sed -n 's/.*"size":\([0-9]*\).*/\1/p')
+# Compared against the WHOLE card, not the safety-reduced budget. The
+# pre-flight exists to catch the hopeless, not the tight: a model just over
+# the margin still has something worth measuring, and refusing it would
+# answer a question it was never asked. An MoE slightly over the line is
+# the case that matters - it runs fine with a few layers in RAM.
+CAPACITY=$(awk -v v="$VRAM_GB" 'BEGIN{ printf "%d", v * 1073741824 }')
+if [ -n "${DISK:-}" ] && [ "$DISK" -ge "$CAPACITY" ] 2>/dev/null; then
+    awk -v d="$DISK" -v b="$CAPACITY" -v m="$MODEL" 'BEGIN{
+        printf "\n%s\n", m;
+        printf "  %.1f GB on disk, against a %.1f GB card.\n", d/1073741824, b/1073741824;
+        printf "  The weights alone exceed the budget, so it would run partly in system\n";
+        printf "  RAM whatever num_ctx says. Not loaded - that would only page.\n" }'
+    exit 0
+fi
+
 echo "probing $MODEL at num_ctx=$LOW ..."
 LOW_OUT=$(probe "$LOW")
 echo "probing $MODEL at num_ctx=$HIGH ..."
@@ -261,19 +286,41 @@ BEGIN {
 
     # Ollama refuses to place a model that would not comfortably fit, so aim
     # below the nameplate figure rather than at it.
-    budget = vram * 1000000000 * 0.90;
+    #
+    # GiB, not 1e9. nvidia-smi and rocm-smi report MiB, and the detection above
+    # divides by 1024 - so VRAM_GB has always been GiB, and multiplying it by
+    # 1e9 under-counted a 24 GB card by 1.8 GB. That turned this 0.90 into a
+    # real margin of about 0.84, which is why 0.85 is the factor now: the
+    # effective headroom is unchanged, the arithmetic just stopped lying about
+    # where it came from. A "24 GB" card is 24 GiB, and Task Manager agrees.
+    budget = vram * 1073741824 * 0.85;
 
     printf "\n%s\n", model;
-    printf "  weights + fixed buffers : %.1f GB\n", base / 1e9;
-    printf "  context cost            : %.1f MB per 1k tokens\n", slope * 1024 / 1e6;
-    printf "  at num_ctx %-13d: %.1f GB total, %.1f GB in VRAM\n", lo, lo_total/1e9, lo_vram/1e9;
-    printf "  at num_ctx %-13d: %.1f GB total, %.1f GB in VRAM\n", hi, hi_total/1e9, hi_vram/1e9;
+    printf "  weights + fixed buffers : %.1f GB\n", base / 1073741824;
+    printf "  context cost            : %.1f MB per 1k tokens\n", slope * 1024 / 1048576;
+    printf "  at num_ctx %-13d: %.1f GB total, %.1f GB in VRAM\n", lo, lo_total/1073741824, lo_vram/1073741824;
+    printf "  at num_ctx %-13d: %.1f GB total, %.1f GB in VRAM\n", hi, hi_total/1073741824, hi_vram/1073741824;
 
     if (base >= budget) {
-        printf "\n  This model does not fit in %d GB at any context - its weights alone\n", vram;
-        printf "  exceed the budget. It will run with layers in system RAM: slower, but\n";
-        printf "  fine for an MoE, painful for a dense model. Context is nearly free in\n";
-        printf "  that mode, so pick a window you actually want.\n";
+        # Two different situations reach here, and calling both "runs in system
+        # RAM" contradicts the probe lines printed directly above. If the card
+        # actually held all of it (size_vram == size), it fits - it just leaves
+        # no safety margin. Saying otherwise sends someone off to buy a bigger
+        # card for a model already running entirely on the one they have.
+        if (lo_vram >= lo_total * 0.999) {
+            printf "\n  Fits the card, but not with a margin. The weights are %.1f GB against a\n", base / 1073741824;
+            printf "  budget of %.1f GB, yet the probe above shows all of it resident. Usable\n", budget / 1073741824;
+            printf "  at a small window with nothing spare - one more model, or a desktop\n";
+            printf "  that gets busy, and it starts spilling. Bake a window only if you\n";
+            printf "  accept that. --assume-empty sizes for the whole card if this box is\n";
+            printf "  headless.\n";
+        } else {
+            printf "\n  This model does not fit in %d GB at any context - its weights alone\n", vram;
+            printf "  exceed the budget, and the probe confirms only %.1f of %.1f GB reached\n", lo_vram/1073741824, lo_total/1073741824;
+            printf "  the card. It runs with layers in system RAM: slower, but fine for an\n";
+            printf "  MoE, painful for a dense model. Context is nearly free in that mode,\n";
+            printf "  so pick a window you actually want.\n";
+        }
         exit;
     }
 

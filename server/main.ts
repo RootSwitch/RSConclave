@@ -404,6 +404,39 @@ function endpointFor(id: unknown): Endpoint {
   return ep;
 }
 
+/*
+ * One in-flight measurement per user, so Cancel has something to name. Keyed
+ * by user rather than by model because that is the granularity the UI offers:
+ * a person presses Measure, then presses Cancel, and means the thing they just
+ * started. Aborting also unloads, so a cancelled probe does not leave the box
+ * holding a model nobody asked for.
+ */
+const measuring = new Map<string, { controller: AbortController; endpointId: string; model: string }>();
+
+route('POST', '/api/measure-ctx/cancel', async (req, res) => {
+  const me = userOf(req);
+  const live = measuring.get(me);
+  if (!live) {
+    sendJson(res, 200, { ok: true, cancelled: false });
+    return;
+  }
+  live.controller.abort();
+  measuring.delete(me);
+  // Best effort: the abort stops us waiting, but the daemon may already have
+  // the model resident. Free it rather than leaving the card held.
+  const config = store.load<AppConfig>('config', { endpoints: [] });
+  const ep = config.endpoints.find((e) => e.id === live.endpointId);
+  if (ep) {
+    fetch(`${ep.baseUrl.replace(/\/+$/, '')}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: live.model, keep_alive: 0 }),
+      signal: AbortSignal.timeout(30_000),
+    }).catch(() => {});
+  }
+  sendJson(res, 200, { ok: true, cancelled: true, model: live.model });
+});
+
 route('POST', '/api/measure-ctx', async (req, res) => {
   userOf(req);
   const body: any = await readJsonBody(req, SMALL_BODY);
@@ -416,10 +449,24 @@ route('POST', '/api/measure-ctx', async (req, res) => {
   if (!(ep.vramGb && ep.vramGb > 0)) {
     throw new HttpError(400, `set the VRAM for "${ep.name}" in Settings before measuring`);
   }
+  const me = userOf(req);
+  // A second Measure while one is running cancels the first rather than racing
+  // it onto the same card.
+  measuring.get(me)?.controller.abort();
+  const controller = new AbortController();
+  measuring.set(me, { controller, endpointId: ep.id, model });
   try {
-    sendJson(res, 200, await measureContext(ep, model, ep.vramGb, { assumeEmpty: !!body?.assumeEmpty }));
+    sendJson(res, 200, await measureContext(ep, model, ep.vramGb, {
+      assumeEmpty: !!body?.assumeEmpty,
+      signal: controller.signal,
+    }));
   } catch (err: any) {
+    // A cancel is a choice, not a failure: 499 so the client can tell it from
+    // a box that fell over, and say "cancelled" rather than showing a stack.
+    if (controller.signal.aborted) throw new HttpError(499, 'measurement cancelled');
     throw new HttpError(502, err?.message ?? String(err));
+  } finally {
+    if (measuring.get(me)?.controller === controller) measuring.delete(me);
   }
 });
 

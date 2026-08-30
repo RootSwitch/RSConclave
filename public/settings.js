@@ -315,30 +315,59 @@ const Settings = {
     const actions = el('span', { class: 'row' });
     const btn = el('button', { class: 'mini' }, 'Measure');
 
+    /*
+     * GiB everywhere, labelled GB - which is what the card's box says, what
+     * Task Manager says, and therefore the only figure a user can check this
+     * against. Dividing by 1e9 made every number here disagree with Task
+     * Manager by 7%, on the one screen people open to compare them.
+     */
+    const GB = (bytes) => (bytes / 1073741824).toFixed(1);
+
     btn.onclick = async () => {
       btn.disabled = true;
       actions.replaceChildren();
+      // Cancel, because the measurement loads the model twice and a model that
+      // was never going to fit can spend minutes paging before it says so.
+      // The pre-flight catches the hopeless cases, but "this is taking longer
+      // than I want" is a reason on its own.
+      const cancelBtn = el('button', { class: 'mini danger', onclick: () => {
+        cancelBtn.disabled = true;
+        cancelBtn.textContent = 'cancelling…';
+        Api.cancelMeasure().catch(() => {});
+      } }, 'Cancel');
+      actions.append(cancelBtn);
       out.className = 'muted';
       out.textContent = 'loading it twice on the box…';
       try {
         const r = await Api.measureCtx(endpointId, model);
-        const perK = (r.bytesPerToken * 1024) / 1e6;
+        actions.replaceChildren();
+        const perK = (r.bytesPerToken * 1024) / 1048576;
         const parts = [
-          `${(r.baseBytes / 1e9).toFixed(1)} GB of weights`,
+          `${GB(r.baseBytes)} GB of weights`,
           `${perK.toFixed(1)} MB per 1k tokens`,
         ];
-        if (r.notFitting) {
+        if (r.skippedLoad) {
+          // Never loaded, so there is no slope to quote - saying "0.0 MB per 1k"
+          // would present a refusal as a measurement.
           out.className = 'error-text';
-          out.textContent = `${parts.join(', ')} - the weights alone exceed the budget, so it will run partly in system RAM whatever num_ctx says.`;
+          out.textContent = `${GB(r.baseBytes)} GB on disk against a ${GB(r.vram.totalGb * 1073741824)} GB card - too big to fit at all, so it was not loaded. Doing so would only page.`;
+        } else if (r.notFitting && r.fitsWithoutMargin) {
+          // It IS on the card; it just leaves no headroom. Telling someone this
+          // runs in system RAM would send them shopping for a card they own.
+          out.className = 'fit-tag raise';
+          out.textContent = `${parts.join(', ')} - fits the card, but past the ${GB(r.budgetBytes)} GB safety budget. Usable with nothing spare: one more model, or a busy desktop, and it spills.`;
+        } else if (r.notFitting) {
+          out.className = 'error-text';
+          out.textContent = `${parts.join(', ')} - the weights alone exceed the budget, and the probe confirms only part of it reached the card. It runs with layers in system RAM.`;
         } else {
           // Which ceiling bound the answer changes what you would do about it:
           // a VRAM cap is an argument for a bigger card, a trained cap is not.
           const why = r.cappedByTrained
             ? `capped at the trained maximum (VRAM alone would allow about ${fmtK(Math.floor(r.uncappedMax))})`
-            : `sized against ${(r.budgetBytes / 1e9).toFixed(1)} GB of budget`;
+            : `sized against ${GB(r.budgetBytes)} GB of budget`;
           out.textContent = `${parts.join(', ')} - recommends num_ctx ${r.recommended} (${fmtK(r.recommended)}), ${why}.`;
           if (r.vram.otherModels.length) {
-            out.textContent += ` Held by ${r.vram.otherModels.join(', ')}: ${(r.vram.heldByOthersBytes / 1e9).toFixed(1)} GB.`;
+            out.textContent += ` Held by ${r.vram.otherModels.join(', ')}: ${GB(r.vram.heldByOthersBytes)} GB.`;
           }
           if (r.currentNumCtx === r.recommended) {
             actions.append(el('span', { class: 'muted' }, 'already set'));
@@ -363,8 +392,12 @@ const Settings = {
           }
         }
       } catch (err) {
-        out.className = 'error-text';
-        out.textContent = err.message;
+        actions.replaceChildren();
+        // 499 is this app saying the user pressed Cancel. Anything else is a
+        // real failure and keeps the error styling.
+        const cancelled = err.status === 499;
+        out.className = cancelled ? 'muted' : 'error-text';
+        out.textContent = cancelled ? 'cancelled - the model was unloaded.' : err.message;
       }
       btn.disabled = false;
     };

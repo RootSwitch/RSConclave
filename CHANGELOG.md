@@ -31,6 +31,36 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**GB now means what the box on your video card means.** The budget multiplied
+your stated VRAM by 1e9 while a "24 GB" card holds 24 GiB, so it under-counted
+by 1.8 GB and turned a stated 10% safety margin into a real 16% one nobody had
+chosen. Everything now computes and reports in GiB and labels it GB - the same
+convention Windows Task Manager uses, which is where anyone checks this. The
+safety factor moved to 0.85 so the effective headroom is unchanged: the units
+were corrected, not the policy. On a 24 GB card the difference is large,
+because it was compounding with people deducting a desktop allowance by hand:
+deepseek-r1:32b went from 2k to 8k, qwen3-coder:30b from 8k to 28k, and
+gemma4:31b and laguna-xs-2.1 stopped reporting as too big to fit at all.
+
+**A model too big to fit is no longer loaded to discover that.** `/api/tags`
+gives the on-disk size, and weights cannot occupy less memory than they occupy
+on disk - so a model larger than the whole card is answered in a fraction of a
+second instead of several minutes of the box paging itself into the ground.
+The threshold is the whole card rather than the safety-reduced budget: this
+exists to catch the hopeless, not the tight, and an MoE just over the margin
+turned out to load entirely into VRAM.
+
+**"Over budget" and "running in system RAM" stopped being the same message.**
+A model whose weights exceed the budget was told it would run partly in system
+RAM - while the probe printed directly above it showed every byte resident on
+the card. That answer sends someone shopping for a card they already own. The
+two cases are now distinguished by what `/api/ps` actually reported.
+
+**Context measurement can be cancelled.** It loads the model twice, so an
+ill-judged one used to be unstoppable. Cancel aborts the in-flight load and
+unloads whatever reached the card, so the box is not left holding a model
+nobody asked for.
+
 **Context sizing moved into the app.** Finding the largest `num_ctx` a model
 can actually hold was a POSIX shell script - a fair ask of someone running a
 headless Ubuntu GPU host, and an absurd one of someone whose entire setup is

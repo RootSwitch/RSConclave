@@ -19,8 +19,33 @@
 import type { Endpoint } from './types.ts';
 import { getModelInfo } from './providers.ts';
 
-/** Ollama refuses to place a model that would not comfortably fit. */
-const SAFETY = 0.9;
+/*
+ * Bytes in a stated gigabyte.
+ *
+ * A card sold as "24 GB" holds 24 GiB, and Windows Task Manager - where anyone
+ * checks this - says "24.0 GB" while meaning exactly that. So the number typed
+ * into Settings is read the way the person typing it means it, and every figure
+ * reported back is divided by the same constant. The app and Task Manager then
+ * agree, which is the only comparison a user can actually make.
+ *
+ * This was 1e9, which quietly under-counted a 24 GB card by 1.8 GB and turned
+ * the stated safety margin below into a real one of about 16%.
+ */
+const GIB = 1024 ** 3;
+
+/*
+ * Ollama refuses to place a model that would not comfortably fit, so aim below
+ * the card rather than at it. This also absorbs what /api/ps cannot see: a
+ * desktop compositor or a browser holding VRAM is invisible to the free
+ * calculation, and on the machine this feature is aimed at, there is always a
+ * desktop.
+ *
+ * 0.85 rather than 0.9 because fixing GIB above removed an accidental margin
+ * that had been doing real work. Chosen to land within a couple of hundred MB
+ * of the old EFFECTIVE headroom, so the change is a correction of the units
+ * rather than a change of policy.
+ */
+const SAFETY = 0.85;
 /** Any num_ctx is legal; 4k steps waste less headroom than powers of two. */
 const STEP = 4096;
 const MIN_CTX = 2048;
@@ -49,8 +74,21 @@ export interface MeasureResult {
   recommended: number | null;
   /** True when the trained ceiling bound the answer rather than VRAM. */
   cappedByTrained: boolean;
-  /** True when the weights alone do not fit; the model will run partly in RAM. */
+  /** True when the weights alone do not fit within the safety budget. */
   notFitting: boolean;
+  /*
+   * Set with notFitting when the probe nevertheless showed the whole model
+   * resident (size_vram == size). It fits the card and only overruns the
+   * margin, which is a different thing to tell someone than "it runs in system
+   * RAM" - that answer sends them shopping for a card they already own.
+   */
+  fitsWithoutMargin?: boolean;
+  /*
+   * True when the answer came from the model's size on disk instead of a load,
+   * because loading it could only have paged. baseBytes is then that disk size
+   * and probes is empty, so a caller must not present it as a measurement.
+   */
+  skippedLoad?: boolean;
   vram: VramBudget;
 }
 
@@ -91,7 +129,7 @@ export function project(
   probes: Probe[],
   budgetBytes: number,
   trainedMax: number | null,
-): Pick<MeasureResult, 'bytesPerToken' | 'baseBytes' | 'uncappedMax' | 'recommended' | 'cappedByTrained' | 'notFitting'> {
+): Pick<MeasureResult, 'bytesPerToken' | 'baseBytes' | 'uncappedMax' | 'recommended' | 'cappedByTrained' | 'notFitting' | 'fitsWithoutMargin'> {
   const [lo, hi] = probes;
   const span = hi.numCtx - lo.numCtx;
   /*
@@ -107,7 +145,13 @@ export function project(
   const baseBytes = lo.total - bytesPerToken * lo.numCtx;
 
   if (baseBytes >= budgetBytes) {
-    return { bytesPerToken, baseBytes, uncappedMax: 0, recommended: null, cappedByTrained: false, notFitting: true };
+    // Whether the card actually held it is what separates "over the margin"
+    // from "spilling", and the probe already answered that.
+    const fitsWithoutMargin = lo.total > 0 && lo.vram >= lo.total * 0.999;
+    return {
+      bytesPerToken, baseBytes, uncappedMax: 0, recommended: null,
+      cappedByTrained: false, notFitting: true, fitsWithoutMargin,
+    };
   }
 
   const uncappedMax = (budgetBytes - baseBytes) / bytesPerToken;
@@ -127,15 +171,39 @@ function base(endpoint: Endpoint): string {
   return endpoint.baseUrl.replace(/\/+$/, '');
 }
 
-async function api(endpoint: Endpoint, path: string, body?: unknown, timeoutMs = 900_000): Promise<any> {
+async function api(
+  endpoint: Endpoint, path: string, body?: unknown, timeoutMs = 900_000, signal?: AbortSignal,
+): Promise<any> {
+  // Two ways to give up: the timeout, and the user pressing Cancel. Combined
+  // rather than chosen between, so a cancel lands mid-load instead of waiting
+  // out a fifteen-minute budget.
+  const timeout = AbortSignal.timeout(timeoutMs);
   const res = await fetch(`${base(endpoint)}${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: body === undefined ? undefined : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
   });
   if (!res.ok) throw new Error(`${path} returned HTTP ${res.status}`);
   return res.json();
+}
+
+/**
+ * On-disk size of a model, from /api/tags. Weights cannot occupy less memory
+ * than they occupy on disk, so this is a lower bound that costs one cheap GET
+ * and can be known BEFORE anything is loaded.
+ */
+async function diskSize(endpoint: Endpoint, model: string, signal?: AbortSignal): Promise<number | null> {
+  try {
+    const data = await api(endpoint, '/api/tags', undefined, 15_000, signal);
+    const want = psName(model);
+    for (const m of data?.models ?? []) {
+      if (String(m.name) === want) return Number(m.size ?? 0) || null;
+    }
+  } catch {
+    // Not knowing the size is not a reason to refuse to measure.
+  }
+  return null;
 }
 
 /** Everything resident right now, as name -> bytes in VRAM. */
@@ -172,14 +240,14 @@ async function waitUnloaded(endpoint: Endpoint, model: string, tries = 20): Prom
 }
 
 /** Load at one context size and read back the real footprint. */
-async function probe(endpoint: Endpoint, model: string, numCtx: number): Promise<Probe> {
+async function probe(endpoint: Endpoint, model: string, numCtx: number, signal?: AbortSignal): Promise<Probe> {
   await api(endpoint, '/api/generate', {
     model,
     prompt: 'hi',
     stream: false,
     keep_alive: '2m',
     options: { num_ctx: numCtx, num_predict: 1 },
-  });
+  }, 900_000, signal);
   const entry = (await api(endpoint, '/api/ps', undefined, 30_000))?.models
     ?.find((m: any) => String(m.name) === psName(model));
   if (!entry) throw new Error(`loaded ${model} at num_ctx ${numCtx} but it was not in /api/ps`);
@@ -191,6 +259,8 @@ export interface MeasureOptions {
   high?: number;
   /** Size against the whole card, ignoring what is loaded beside it. */
   assumeEmpty?: boolean;
+  /** Cancel: aborts the in-flight load and unloads whatever it started. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -219,7 +289,7 @@ export async function measureContext(
   const heldByOthersBytes = opts.assumeEmpty
     ? 0
     : [...resident.values()].reduce((a, b) => a + b, 0);
-  const budgetBytes = Math.max(totalVramGb * 1e9 - heldByOthersBytes, 0) * SAFETY;
+  const budgetBytes = Math.max(totalVramGb * GIB - heldByOthersBytes, 0) * SAFETY;
   const vram: VramBudget = {
     totalGb: totalVramGb,
     heldByOthersBytes,
@@ -227,7 +297,47 @@ export async function measureContext(
     budgetBytes,
   };
 
-  const probes = [await probe(endpoint, model, low), await probe(endpoint, model, high)];
+  /*
+   * Refuse to load something that provably cannot fit. Weights occupy at least
+   * what they occupy on disk, so a model bigger than the whole budget is
+   * hopeless before any of it is read - and loading it anyway is not a slow
+   * measurement, it is the machine paging itself into the ground for several
+   * minutes to learn something /api/tags already said.
+   *
+   * The answer returned is the real one (notFitting), just reached without the
+   * damage, with the disk figure standing in for the weights it declined to
+   * load. Only a clear-cut case is refused: a model that merely looks tight is
+   * still measured, because the disk size is a lower bound and the interesting
+   * models are the ones near the line.
+   */
+  // Compared against the WHOLE card, not the safety-reduced budget: this
+  // exists to catch the hopeless, not the tight. A model just over the
+  // margin still has something worth measuring - and on a 24 GB card, an
+  // MoE at 21 GB turned out to load entirely into VRAM.
+  const capacityBytes = Math.max(totalVramGb * GIB - heldByOthersBytes, 0);
+  const onDisk = await diskSize(endpoint, model, opts.signal);
+  if (onDisk && onDisk >= capacityBytes) {
+    return {
+      model,
+      probes: [],
+      bytesPerToken: 0,
+      baseBytes: onDisk,
+      trainedMax: null,
+      currentNumCtx: null,
+      budgetBytes,
+      vram,
+      uncappedMax: 0,
+      recommended: null,
+      cappedByTrained: false,
+      notFitting: true,
+      skippedLoad: true,
+    };
+  }
+
+  const probes = [
+    await probe(endpoint, model, low, opts.signal),
+    await probe(endpoint, model, high, opts.signal),
+  ];
   await unload(endpoint, model);
 
   const info = await getModelInfo(endpoint, model);
