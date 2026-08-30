@@ -983,7 +983,23 @@ async function cloneSession(sessionId) {
   const target = view === 'council' ? Council
     : view === 'roundtable' ? Roundtable
     : view === 'pipeline' ? Pipeline : Chat;
-  await target.applyConfig(session.config);
+  /*
+   * A council keeps its prompt in CouncilConfig, so cloning one carries the
+   * question across for free. A chat's opening message is not a declared field
+   * of ChatConfig - startChat persists the request body verbatim, so a stray
+   * `message` is usually present, but nothing in the type says it must be and
+   * nothing maintains it. The transcript is the record that is actually kept,
+   * so read that and treat the stray field only as a fallback for a chat that
+   * was started and never sent.
+   *
+   * The FIRST user entry specifically: that is what the setup form asks for,
+   * and the analogue of the council prompt. Later turns belong to the
+   * conversation that already happened, not to a new one being set up.
+   */
+  const firstMessage = view === 'chat'
+    ? (session.entries?.find((e) => e.kind === 'user')?.text ?? session.config?.message)
+    : undefined;
+  await target.applyConfig(session.config, firstMessage);
 }
 
 function cloneButton(session) {

@@ -300,7 +300,13 @@ const Chat = {
   },
 
   /** Clone entry point: the model list must load before its value can be set. */
-  async applyConfig(config) {
+  /*
+   * `firstMessage` arrives separately because a chat's opening prompt is not a
+   * declared part of ChatConfig the way a council's `prompt` is - the caller
+   * reads it off the transcript. Cloning a chat used to drop it silently and
+   * leave you retyping the thing you were trying to vary.
+   */
+  async applyConfig(config, firstMessage) {
     const s = this.setup;
     if (config.endpointId && [...s.endpoint.options].some((o) => o.value === config.endpointId)) {
       s.endpoint.value = config.endpointId;
@@ -313,6 +319,14 @@ const Chat = {
     s.system.value = config.systemPrompt ?? '';
     s.temp.value = config.params?.temperature ?? '';
     s.ctx.value = config.params?.num_ctx ?? '';
+    // Dropped by the same omission as the message: council restores both of
+    // these on clone, so a chat that quietly lost its attached documents and
+    // its output cap was inconsistent rather than deliberate.
+    s.maxOut.value = config.params?.maxTokens ?? '';
+    s.docState.ids = (config.documentIds ?? []).filter((id) => App.documents.some((d) => d.id === id));
+    s.docState.sync?.();
+    if (firstMessage) s.message.value = firstMessage;
+    this.refreshSetupFit();
   },
 
   async start() {

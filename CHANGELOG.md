@@ -31,6 +31,14 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**Clone to new on a chat now brings the opening message, its documents and its
+output cap.** A council keeps its prompt in the config, so cloning one carries
+the question across; a chat's opening message is not a declared config field,
+so the clone arrived blank and you retyped the thing you were trying to vary.
+It is read off the transcript now, which is the record that is actually kept.
+The same omission was quietly dropping attached documents and maxTokens, both
+of which the council clone had always restored.
+
 **GB now means what the box on your video card means.** The budget multiplied
 your stated VRAM by 1e9 while a "24 GB" card holds 24 GiB, so it under-counted
 by 1.8 GB and turned a stated 10% safety margin into a real 16% one nobody had
