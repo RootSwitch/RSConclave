@@ -31,6 +31,25 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**The recommended num_ctx is now verified by loading at it, not extrapolated
+to.** Two probes at 2k and 8k give a straight line, and on real hardware that
+line over-promises badly: on a 24 GB 7900XTX it recommended 176128 for
+qwen3.6:27b, and loading at that put 58% of the model on the card and 15 t/s on
+the clock, against 60 t/s at a window that fits. Ollama picks its layer split
+at load time from its own estimate, and `/api/ps` "size" understates what that
+reserves once the context is large - neither is visible from the low end of the
+curve. The measurement now loads at its own answer and binary-searches down
+until the card takes the whole model. For that case the honest number is 77824,
+and it spills at 90112. Costs a handful of extra loads; the alternative is a
+number that is arithmetically true and three times slower.
+
+**A box running on the CPU is told so instead of being sized.** The ROG Ally X
+reports `size_vram` 0 - its 780M is not a GPU Ollama will use - and budgeting
+that against a stated VRAM figure invented an answer about hardware doing none
+of the work. The cost per token is still reported, because context costs memory
+either way, but no window is recommended: the real ceiling is free system RAM,
+which nothing reachable over HTTP can see.
+
 **Clone to new on a chat now brings the opening message, its documents and its
 output cap.** A council keeps its prompt in the config, so cloning one carries
 the question across; a chat's opening message is not a declared config field,

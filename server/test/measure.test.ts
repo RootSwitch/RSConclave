@@ -108,3 +108,33 @@ test('measure: over budget but fully resident is not "runs in system RAM"', () =
   assert.equal(s.notFitting, true);
   assert.equal(s.fitsWithoutMargin, false);
 });
+
+test('measure: a CPU-only box gets no VRAM recommendation', () => {
+  /*
+   * The ROG Ally X reports size_vram 0 for qwen3.5:4b - its 780M is not a GPU
+   * Ollama will use. project() still describes the cost, but measureContext
+   * discards the recommendation, because it was derived from a stated VRAM
+   * figure for a card doing none of the work. This pins the slope half: the
+   * arithmetic must stay honest even where the answer is suppressed.
+   */
+  const cpu = [
+    { numCtx: 2048, total: 2.85 * B, vram: 0 },
+    { numCtx: 8192, total: 3.12 * B, vram: 0 },
+  ];
+  const r = project(cpu, 8 * GIB * SAFETY, 262144);
+  assert.ok(r.bytesPerToken > 0, 'context still costs memory on the CPU path');
+  assert.equal(r.notFitting, false);
+});
+
+test('measure: residency is judged from the probe, not the budget', () => {
+  /*
+   * qwen3.6:27b on the 24 GB 7900XTX, as measured: 100% resident at 8k, 58% at
+   * 176k. The extrapolation from the low end recommended 176k; loading at it
+   * showed the card taking barely half. isResident is the check that catches
+   * that, so it must not be fooled by a total that merely LOOKS affordable.
+   */
+  const at176k = { numCtx: 176128, total: 20.98 * B, vram: 12.19 * B };
+  const at8k = { numCtx: 8192, total: 16.12 * B, vram: 16.12 * B };
+  assert.ok(at176k.vram < at176k.total * 0.999, 'spilling probe must not read as resident');
+  assert.ok(at8k.vram >= at8k.total * 0.999, 'fully-resident probe must read as resident');
+});

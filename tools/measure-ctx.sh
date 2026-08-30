@@ -369,11 +369,57 @@ BEGIN {
 }')
 printf '%s\n' "$REPORT"
 
+# Verify the recommendation by loading at it, and walk it down until the card
+# takes the whole model.
+#
+# The slope from two small probes is a MODEL, and it over-promises badly. On a
+# 24 GB 7900XTX this recommended num_ctx 176128 for qwen3.6:27b; loading at it
+# put 58% on the card and 15 t/s on the clock, against 60 t/s at a window that
+# fits. Ollama decides its layer split at load time from its own estimate, and
+# /api/ps "size" understates what that reserves once the context is large -
+# neither is visible from the low end of the curve. So the answer stops being
+# extrapolated and starts being confirmed.
+REC=$(printf '%s\n' "$REPORT" | sed -n 's/.*Recommended num_ctx *: *\([0-9][0-9]*\).*/\1/p')
+if [ -n "$REC" ] && [ "$REC" -gt "$HIGH" ] 2>/dev/null; then
+    resident_at() { # num_ctx -> "1" resident, "0" spilling
+        probe "$1" | awk '{ print ($2 >= $1 * 0.999 && $1 > 0) ? 1 : 0 }'
+    }
+    echo ""
+    echo "verifying at num_ctx=$REC ..."
+    if [ "$(resident_at "$REC")" = "0" ]; then
+        LO=$HIGH; HI=$REC
+        # Four steps narrows the usual gap below the 4k the answer is rounded
+        # to; more would cost a model load each for precision nobody reports.
+        i=0
+        while [ $i -lt 4 ] && [ $((HI - LO)) -gt 4096 ]; do
+            MID=$(( ((LO + HI) / 2 / 4096) * 4096 ))
+            [ "$MID" -le "$LO" ] && break
+            [ "$MID" -ge "$HI" ] && break
+            printf "  trying num_ctx=%s ... " "$MID"
+            # Reported after the probe, not before it: printing a fixed
+            # "spilled" up front described the PREVIOUS step and called
+            # every resident midpoint a failure.
+            if [ "$(resident_at "$MID")" = "1" ]; then LO=$MID; echo "resident"; else HI=$MID; echo "spills"; fi
+            i=$((i + 1))
+        done
+        echo ""
+        echo "  Verified num_ctx        : $LO"
+        echo "  ($REC was the arithmetic's answer; the card only took part of it."
+        echo "   It spills at $HI. Baking the verified figure instead.)"
+        REC=$LO
+    else
+        echo "  confirmed resident at $REC."
+    fi
+    unload
+fi
+
 # --apply: do the bake ourselves. The number is parsed back out of the report
 # rather than computed a second time, so what gets applied is BY CONSTRUCTION
 # what was shown - two code paths deriving it independently is how they drift.
 if [ "$APPLY" -eq 1 ]; then
-    REC=$(printf '%s\n' "$REPORT" | sed -n 's/.*Recommended num_ctx *: *\([0-9][0-9]*\).*/\1/p')
+    # REC is already set above: parsed from the report, then REPLACED by the
+    # verified figure when loading at it showed the card spilling. Re-deriving
+    # it here would discard that and bake the number just disproved.
     if [ -z "$REC" ]; then
         echo "apply: nothing to apply - the model does not fit this budget at any context" >&2
         exit 1

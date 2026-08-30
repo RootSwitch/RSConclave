@@ -346,7 +346,12 @@ const Settings = {
           `${GB(r.baseBytes)} GB of weights`,
           `${perK.toFixed(1)} MB per 1k tokens`,
         ];
-        if (r.skippedLoad) {
+        if (r.onCpu) {
+          // Nothing to size: the card took none of it. Reporting a window from
+          // a stated VRAM figure would describe hardware not in play.
+          out.className = 'fit-tag raise';
+          out.textContent = `${parts.join(', ')} - running entirely on the CPU, so there is no VRAM window to recommend. Ollama is not using this box's GPU; the limit here is free system RAM, which nothing over HTTP can see.`;
+        } else if (r.skippedLoad) {
           // Never loaded, so there is no slope to quote - saying "0.0 MB per 1k"
           // would present a refusal as a measurement.
           out.className = 'error-text';
@@ -362,9 +367,14 @@ const Settings = {
         } else {
           // Which ceiling bound the answer changes what you would do about it:
           // a VRAM cap is an argument for a bigger card, a trained cap is not.
-          const why = r.cappedByTrained
-            ? `capped at the trained maximum (VRAM alone would allow about ${fmtK(Math.floor(r.uncappedMax))})`
-            : `sized against ${GB(r.budgetBytes)} GB of budget`;
+          // Verified beats extrapolated, and says so: the arithmetic's answer
+          // was measured to spill, which is worth seeing rather than silently
+          // returning a smaller number than the numbers above imply.
+          const why = r.verified?.spilledAt
+            ? `confirmed by loading at it - the arithmetic suggested ${fmtK(r.verified.extrapolated)}, but the card only took ${Math.round(100 * (r.probes.find((p) => p.numCtx === r.verified.spilledAt)?.vram ?? 0) / (r.probes.find((p) => p.numCtx === r.verified.spilledAt)?.total || 1))}% of it at ${fmtK(r.verified.spilledAt)}`
+            : r.cappedByTrained
+              ? `capped at the trained maximum (VRAM alone would allow about ${fmtK(Math.floor(r.uncappedMax))})`
+              : `sized against ${GB(r.budgetBytes)} GB of budget`;
           out.textContent = `${parts.join(', ')} - recommends num_ctx ${r.recommended} (${fmtK(r.recommended)}), ${why}.`;
           if (r.vram.otherModels.length) {
             out.textContent += ` Held by ${r.vram.otherModels.join(', ')}: ${GB(r.vram.heldByOthersBytes)} GB.`;

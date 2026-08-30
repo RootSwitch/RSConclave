@@ -89,6 +89,20 @@ export interface MeasureResult {
    * and probes is empty, so a caller must not present it as a measurement.
    */
   skippedLoad?: boolean;
+  /*
+   * True when the probes showed the model running entirely on the CPU
+   * (size_vram 0). A stated VRAM figure describes hardware that is not being
+   * used, so no window is recommended from it - the real limit is system RAM,
+   * which nothing here can see.
+   */
+  onCpu?: boolean;
+  /*
+   * Present when the recommendation was checked by loading at it rather than
+   * only extrapolated to. largestResident is the biggest window the card
+   * actually took whole; spilledAt is the smallest known to spill, or null if
+   * the first guess was already good.
+   */
+  verified?: { largestResident: number; spilledAt: number | null; extrapolated: number };
   vram: VramBudget;
 }
 
@@ -254,6 +268,51 @@ async function probe(endpoint: Endpoint, model: string, numCtx: number, signal?:
   return { numCtx, total: Number(entry.size ?? 0), vram: Number(entry.size_vram ?? 0) };
 }
 
+/** Did the card take all of it? A hair under 1 to absorb rounding in /api/ps. */
+function isResident(p: Probe): boolean {
+  return p.total > 0 && p.vram >= p.total * 0.999;
+}
+
+/*
+ * Confirm the recommendation by loading at it, and walk it down until the card
+ * actually takes the whole model.
+ *
+ * The slope from two small probes is a MODEL of the cost, and on real hardware
+ * it over-promises badly. Measured on a 24 GB 7900XTX, qwen3.6:27b reported
+ * 100% resident at 32k, 85% at 98k, 73% at 131k and 58% at 176k - while the
+ * extrapolation, which only ever saw 2k and 8k, happily recommended 176k. Two
+ * reasons: Ollama decides how many layers to offload at load time using its own
+ * estimate, and /api/ps "size" understates what that estimate reserves once the
+ * context is large. Neither is visible from the low end of the curve.
+ *
+ * So the answer stops being extrapolated and starts being verified. Binary
+ * search between a context known to be resident and the first one known to
+ * spill, which costs a handful of loads and is the difference between a number
+ * that is true and a number that merely fits the arithmetic.
+ */
+async function verifyResident(
+  endpoint: Endpoint, model: string, target: number, knownGood: number, signal?: AbortSignal,
+): Promise<{ probes: Probe[]; largestResident: number; spilledAt: number | null }> {
+  const probes: Probe[] = [];
+  const first = await probe(endpoint, model, target, signal);
+  probes.push(first);
+  if (isResident(first)) return { probes, largestResident: target, spilledAt: null };
+
+  let lo = knownGood;        // resident, by construction: it was probed above
+  let hi = target;           // spills
+  // Four steps narrows a 32k-176k gap to about 9k, which is finer than the 4k
+  // rounding that follows. More would cost a model load each for no more
+  // precision than the answer is reported to.
+  for (let i = 0; i < 4 && hi - lo > STEP; i++) {
+    const mid = Math.max(Math.floor((lo + hi) / 2 / STEP) * STEP, lo + STEP);
+    if (mid >= hi) break;
+    const p = await probe(endpoint, model, mid, signal);
+    probes.push(p);
+    if (isResident(p)) lo = mid; else hi = mid;
+  }
+  return { probes, largestResident: lo, spilledAt: hi };
+}
+
 export interface MeasureOptions {
   low?: number;
   high?: number;
@@ -338,10 +397,47 @@ export async function measureContext(
     await probe(endpoint, model, low, opts.signal),
     await probe(endpoint, model, high, opts.signal),
   ];
-  await unload(endpoint, model);
 
   const info = await getModelInfo(endpoint, model);
   const projection = project(probes, budgetBytes, info?.contextLength ?? null);
+
+  /*
+   * A model already running on the CPU has nothing to size. The Ally X reports
+   * size_vram 0 for qwen3.5:4b because its 780M is not a GPU Ollama will use,
+   * and budgeting that against a stated VRAM figure would invent an answer
+   * about hardware not in play. Say so instead.
+   */
+  const onCpu = probes.every((p) => p.total > 0 && p.vram === 0);
+  if (onCpu) {
+    /*
+     * The slope is still real - context costs memory either way, and that is
+     * worth reporting. The RECOMMENDATION is not: it was derived from a stated
+     * VRAM figure describing a card taking none of the work. Returning it
+     * anyway would be the confident-wrong-number failure this whole feature
+     * keeps running into. The real ceiling is free system RAM, which nothing
+     * reachable over HTTP can see.
+     */
+    projection.recommended = null;
+    projection.cappedByTrained = false;
+  }
+
+  let verified: MeasureResult['verified'];
+  if (!onCpu && !projection.notFitting && projection.recommended && projection.recommended > high) {
+    const v = await verifyResident(endpoint, model, projection.recommended, high, opts.signal);
+    probes.push(...v.probes);
+    verified = {
+      largestResident: v.largestResident,
+      spilledAt: v.spilledAt,
+      // What the extrapolation had claimed, kept so the report can say the
+      // verification changed the answer rather than silently returning a
+      // smaller number than the arithmetic implied.
+      extrapolated: projection.recommended,
+    };
+    projection.recommended = v.largestResident;
+    if (v.spilledAt !== null) projection.cappedByTrained = false;
+  }
+
+  await unload(endpoint, model);
 
   return {
     model,
@@ -350,6 +446,8 @@ export async function measureContext(
     currentNumCtx: info?.numCtx ?? null,
     budgetBytes,
     vram,
+    onCpu,
+    verified,
     ...projection,
   };
 }
