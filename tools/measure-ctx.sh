@@ -138,8 +138,13 @@ if [ -z "$VRAM_GB" ]; then
         echo "" >&2
         echo "  $0 $MODEL --host $HOST --vram GB" >&2
         echo "" >&2
-        echo "Its free VRAM, from that box:  nvidia-smi --query-gpu=memory.free --format=csv" >&2
-        echo "Or run this script on that box, where detection works." >&2
+        echo "Free VRAM, read on that box:" >&2
+        echo "  nvidia-smi --query-gpu=memory.free --format=csv   (NVIDIA)" >&2
+        echo "  rocm-smi --showmeminfo vram                       (AMD, Linux)" >&2
+        echo "  Task Manager > Performance > GPU                  (Windows, either vendor)" >&2
+        echo "" >&2
+        echo "On Windows the desktop is holding some of the card, so the free figure" >&2
+        echo "is the one to use and it moves while you use the machine." >&2
         exit 2
     fi
     unload
