@@ -1,6 +1,11 @@
 #!/bin/sh
 # measure-ctx.sh - find the largest num_ctx a model can hold without spilling.
 #
+# The app does this too, without a terminal: Settings > an Ollama endpoint >
+# Context sizing. Same method and same arithmetic (server/measure.ts), for
+# the person whose whole setup is Ollama and RSConclave on one Windows box.
+# This script stays for scripting it, and for boxes with no app on them.
+#
 # Context sizing is the one number no table can give you: it depends on the
 # model's attention geometry (sliding-window and hybrid-Mamba models cost
 # almost nothing per token, dense GQA models cost a lot), the quantisation,
@@ -63,7 +68,10 @@ while [ $# -gt 0 ]; do
         --high) HIGH=$2; shift 2 ;;
         --assume-empty) ASSUME_EMPTY=1; shift ;;
         --apply) APPLY=1; shift ;;
-        -h|--help) sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        # Bounded by where the header actually ends rather than a line number:
+        # the fixed "2,41p" silently truncated mid-options the moment four
+        # lines were added at the top, hiding the description of --apply.
+        -h|--help) sed -n '2,/^set -eu/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*) echo "unknown option: $1" >&2; exit 2 ;;
         *)  MODEL=$1; shift ;;
     esac

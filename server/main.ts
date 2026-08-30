@@ -9,6 +9,7 @@ import { BIG_BODY, dispatch, readJsonBody, route, sendJson, HttpError, SMALL_BOD
 import { serveStatic } from './static.ts';
 import { handleSse, onConnectSnapshot } from './sse.ts';
 import { clearModelInfoCache, discoverModels, getModelInfo } from './providers.ts';
+import { applyNumCtx, measureContext } from './measure.ts';
 import * as store from './store.ts';
 import * as engine from './engine.ts';
 import * as rt from './roundtable.ts';
@@ -16,7 +17,7 @@ import * as chat from './chat.ts';
 import * as auth from './auth.ts';
 import { sessionToMarkdown } from './exportMd.ts';
 import { searchSessions } from './search.ts';
-import type { AppConfig, Document, Persona, Presets, Session } from './types.ts';
+import type { AppConfig, Document, Endpoint, Persona, Presets, Session } from './types.ts';
 import {
   DEFAULT_COMPACT_TEMPLATE,
   DEFAULT_CONSOLIDATOR_TEMPLATE,
@@ -206,6 +207,11 @@ route('PUT', '/api/config', async (req, res) => {
     }
     const out: Record<string, unknown> = { id, name, baseUrl, kind };
     if (raw?.defaultKeepAlive !== undefined) out.defaultKeepAlive = String(raw.defaultKeepAlive);
+    // Only used by context measurement, and only meaningful as a positive
+    // number. A junk value is dropped rather than stored, so a bad edit cannot
+    // turn into a confidently wrong context recommendation later.
+    const vram = Number(raw?.vramGb);
+    if (Number.isFinite(vram) && vram > 0 && vram <= 1024) out.vramGb = vram;
     if (raw?.aliases && typeof raw.aliases === 'object') {
       const aliases: Record<string, string> = {};
       for (const [k, v] of Object.entries(raw.aliases as Record<string, unknown>)) {
@@ -380,6 +386,61 @@ route('GET', '/api/model-info', async (req, res, _params, query) => {
   const info: Record<string, unknown> = {};
   for (const [m, i] of entries) if (i) info[m] = i;
   sendJson(res, 200, { info });
+});
+
+/*
+ * --- context measurement ---
+ *
+ * Slow on purpose: it loads the model twice, so a big one can take minutes.
+ * There is no job queue behind this because there is nothing to resume - the
+ * probes leave no state, and a caller who gives up costs nothing but the two
+ * loads that were happening anyway. The client is told to expect the wait.
+ */
+function endpointFor(id: unknown): Endpoint {
+  const config = store.load<AppConfig>('config', { endpoints: [] });
+  const ep = config.endpoints.find((e) => e.id === id);
+  if (!ep) throw new HttpError(404, 'unknown endpoint');
+  if (ep.kind !== 'ollama') throw new HttpError(400, 'context measurement needs an Ollama endpoint');
+  return ep;
+}
+
+route('POST', '/api/measure-ctx', async (req, res) => {
+  userOf(req);
+  const body: any = await readJsonBody(req, SMALL_BODY);
+  const ep = endpointFor(body?.endpointId);
+  const model = String(body?.model ?? '');
+  if (!model) throw new HttpError(400, 'model is required');
+  // The budget lives on the endpoint rather than in this request: an HTTP
+  // client cannot see the card, so somebody has to say how big it is, and
+  // saying it once per box beats saying it per measurement.
+  if (!(ep.vramGb && ep.vramGb > 0)) {
+    throw new HttpError(400, `set the VRAM for "${ep.name}" in Settings before measuring`);
+  }
+  try {
+    sendJson(res, 200, await measureContext(ep, model, ep.vramGb, { assumeEmpty: !!body?.assumeEmpty }));
+  } catch (err: any) {
+    throw new HttpError(502, err?.message ?? String(err));
+  }
+});
+
+route('POST', '/api/measure-ctx/apply', async (req, res) => {
+  userOf(req);
+  const body: any = await readJsonBody(req, SMALL_BODY);
+  const ep = endpointFor(body?.endpointId);
+  const model = String(body?.model ?? '');
+  const numCtx = Number(body?.numCtx);
+  if (!model) throw new HttpError(400, 'model is required');
+  if (!Number.isInteger(numCtx) || numCtx < 2048) throw new HttpError(400, 'numCtx must be a whole number of at least 2048');
+  try {
+    await applyNumCtx(ep, model, numCtx);
+  } catch (err: any) {
+    throw new HttpError(502, err?.message ?? String(err));
+  }
+  // The bake changed the model's Modelfile, and the cached /api/show answer is
+  // now the pre-bake one. Everything that displays a context window reads that
+  // cache, so without this the UI reports the old default until it expires.
+  clearModelInfoCache();
+  sendJson(res, 200, { ok: true, model, numCtx });
 });
 
 // --- model discovery ---

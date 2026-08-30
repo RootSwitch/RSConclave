@@ -31,6 +31,27 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**Context sizing moved into the app.** Finding the largest `num_ctx` a model
+can actually hold was a POSIX shell script - a fair ask of someone running a
+headless Ubuntu GPU host, and an absurd one of someone whose entire setup is
+Ollama and this app on one Windows machine, who would have to install Git Bash
+before they could begin. **Settings > an Ollama endpoint > Context sizing**
+now lists that box's models with a Measure button each: same method, same
+arithmetic, no terminal. It loads the model twice, reports what the weights
+cost and what a thousand tokens of context cost, and recommends a window -
+saying which ceiling bound it, because a VRAM cap is an argument for a bigger
+card and a trained-maximum cap is not. **Bake in** then writes it into the
+model on the box for every client of that daemon, not just this app, and only
+ever the number just displayed.
+
+The budget it sizes against comes from a new **VRAM GB** field on the
+endpoint, because an HTTP client cannot see the card the way `nvidia-smi`
+can - stated once per box rather than asked for every time. What is free is
+then derived from `/api/ps`, which is better than the script when the box is
+remote and worse in one specific way: it sees only what Ollama is holding, so
+a desktop compositor or a game holding two gigabytes is invisible to it. On a
+machine someone is actually using, treat the free figure as optimistic.
+
 **`measure-ctx.sh --apply` no longer needs the ollama CLI.** It shelled out to
 `ollama create`, which made the one step that writes something the only step
 that could not run from a machine reaching the daemon over the network and

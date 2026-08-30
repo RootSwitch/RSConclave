@@ -131,6 +131,15 @@ const Settings = {
           el('option', { value: 'ollama' }, 'ollama'),
           el('option', { value: 'openai' }, 'openai-compat')),
         keepAlive: el('input', { placeholder: 'keep_alive (5m)', value: ep?.defaultKeepAlive ?? '', style: 'width: 80px' }),
+        // Nothing in a normal run reads this. It exists so context measurement
+        // has a budget: the app talks to the box over HTTP and cannot see the
+        // card the way nvidia-smi can, so the size has to be stated once here
+        // rather than asked for on every measurement.
+        vram: el('input', {
+          type: 'number', min: '1', max: '1024', placeholder: 'VRAM GB',
+          value: ep?.vramGb ?? '', style: 'width: 90px',
+          title: 'How much VRAM this box has. Only used by context measurement.',
+        }),
       };
       if (ep?.kind) els.kind.value = ep.kind;
       const testResult = el('div', { class: 'test-result', style: 'grid-column: 1 / -1' });
@@ -169,6 +178,47 @@ const Settings = {
         },
       }, 'Model names');
 
+      /*
+       * Context sizing, in the app, because the shell script that does this is
+       * POSIX sh: a fair ask of someone with a headless Ubuntu GPU host, and an
+       * absurd one of someone whose whole setup is Ollama and this app on one
+       * Windows machine. Same method, same arithmetic, no terminal.
+       *
+       * It lives on the endpoint rather than in the model pickers because it is
+       * a property of the box, it is slow, and it writes to the model - none of
+       * which belong beside a dropdown you are using to start a conversation.
+       */
+      const ctxWrap = el('div', { class: 'col hidden', style: 'grid-column: 1 / -1' });
+      const ctxBtn = el('button', {
+        title: 'Measure the largest context each model can hold on this box, and optionally bake it in',
+        onclick: async () => {
+          if (ctxWrap.classList.toggle('hidden')) return;
+          if (els.kind.value !== 'ollama') {
+            ctxWrap.replaceChildren(el('span', { class: 'muted' },
+              'Only Ollama endpoints report the footprint this needs. An openai-compat server exposes no equivalent.'));
+            return;
+          }
+          ctxWrap.replaceChildren(el('span', { class: 'muted' }, 'loading models…'));
+          try {
+            await save(); // measuring goes through the server, which reads saved config
+            const { models } = await Api.getModels(id);
+            // Filtered, not passed straight through: el() drops null children
+            // but replaceChildren() stringifies them, so a skipped element
+            // renders the word "null" in the panel.
+            ctxWrap.replaceChildren(...[
+              el('span', { class: 'muted' },
+                'Loads each model twice to find its real cost per token, so allow a minute or two per model. ' +
+                'Nothing is written unless you press Bake in.'),
+              !Number(els.vram.value) ? el('span', { class: 'error-text' },
+                'Set this endpoint\'s VRAM GB above and Save first - there is no way to read the card over HTTP.') : null,
+              ...models.map((m) => this.ctxRow(id, m)),
+            ].filter(Boolean));
+          } catch (err) {
+            ctxWrap.replaceChildren(el('span', { class: 'error-text' }, err.message));
+          }
+        },
+      }, 'Context sizing');
+
       const testBtn = el('button', { onclick: async () => {
         testResult.textContent = 'testing…';
         try {
@@ -196,9 +246,12 @@ const Settings = {
         () => save().then(() => alert('saved')).catch((e) => alert(e.message)));
 
       const row = el('div', { class: 'endpoint-row' },
-        els.name, els.baseUrl, els.kind, els.keepAlive,
-        el('span', { class: 'row' }, testBtn, aliasBtn, delBtn),
-        testResult, aliasWrap);
+        els.name, els.baseUrl, els.kind, els.keepAlive, els.vram,
+        // Delete gets its own column rather than riding in the button span:
+        // the span wraps when the actions outgrow it, and the button that
+        // wrapped onto a line of its own was the destructive one.
+        el('span', { class: 'row' }, testBtn, aliasBtn, ctxBtn), delBtn,
+        testResult, aliasWrap, ctxWrap);
       rowsWrap.append(row);
       rows.push(rowObj);
     };
@@ -212,6 +265,7 @@ const Settings = {
           baseUrl: r.els.baseUrl.value.trim().replace(/\/+$/, ''),
           kind: r.els.kind.value,
           defaultKeepAlive: r.els.keepAlive.value.trim() || undefined,
+          vramGb: Number(r.els.vram.value) > 0 ? Number(r.els.vram.value) : undefined,
           aliases: Object.keys(r.aliases).length ? r.aliases : undefined,
         }));
       await Api.putConfig({ endpoints });
@@ -245,6 +299,79 @@ const Settings = {
   },
 
   /* ---------- personas ---------- */
+
+  /**
+   * One model's row in the context-sizing panel: measure, read the answer,
+   * optionally bake it in.
+   *
+   * The recommendation is shown before anything is written, and the Bake in
+   * button appears only after a measurement, because it edits the model on the
+   * box for every client of that daemon - not just this app. The number it
+   * writes is the one displayed, taken from the same result object, so the two
+   * cannot disagree.
+   */
+  ctxRow(endpointId, model) {
+    const out = el('span', { class: 'muted' });
+    const actions = el('span', { class: 'row' });
+    const btn = el('button', { class: 'mini' }, 'Measure');
+
+    btn.onclick = async () => {
+      btn.disabled = true;
+      actions.replaceChildren();
+      out.className = 'muted';
+      out.textContent = 'loading it twice on the box…';
+      try {
+        const r = await Api.measureCtx(endpointId, model);
+        const perK = (r.bytesPerToken * 1024) / 1e6;
+        const parts = [
+          `${(r.baseBytes / 1e9).toFixed(1)} GB of weights`,
+          `${perK.toFixed(1)} MB per 1k tokens`,
+        ];
+        if (r.notFitting) {
+          out.className = 'error-text';
+          out.textContent = `${parts.join(', ')} - the weights alone exceed the budget, so it will run partly in system RAM whatever num_ctx says.`;
+        } else {
+          // Which ceiling bound the answer changes what you would do about it:
+          // a VRAM cap is an argument for a bigger card, a trained cap is not.
+          const why = r.cappedByTrained
+            ? `capped at the trained maximum (VRAM alone would allow about ${fmtK(Math.floor(r.uncappedMax))})`
+            : `sized against ${(r.budgetBytes / 1e9).toFixed(1)} GB of budget`;
+          out.textContent = `${parts.join(', ')} - recommends num_ctx ${r.recommended} (${fmtK(r.recommended)}), ${why}.`;
+          if (r.vram.otherModels.length) {
+            out.textContent += ` Held by ${r.vram.otherModels.join(', ')}: ${(r.vram.heldByOthersBytes / 1e9).toFixed(1)} GB.`;
+          }
+          if (r.currentNumCtx === r.recommended) {
+            actions.append(el('span', { class: 'muted' }, 'already set'));
+          } else {
+            actions.append(el('button', { class: 'mini', title:
+              'Writes num_ctx into the model on the box. Every client of that daemon gets it, not just this app.',
+              onclick: async (e) => {
+                const b = e.target;
+                b.disabled = true;
+                b.textContent = 'baking…';
+                try {
+                  await Api.applyNumCtx(endpointId, model, r.recommended);
+                  b.replaceWith(el('span', { class: 'muted' }, `baked in at ${fmtK(r.recommended)}`));
+                  App.modelInfoByEndpoint = {}; // the window it reports just changed
+                } catch (err) {
+                  b.disabled = false;
+                  b.textContent = 'Bake in';
+                  out.className = 'error-text';
+                  out.textContent = err.message;
+                }
+              } }, 'Bake in'));
+          }
+        }
+      } catch (err) {
+        out.className = 'error-text';
+        out.textContent = err.message;
+      }
+      btn.disabled = false;
+    };
+
+    return el('div', { class: 'row' },
+      el('span', { class: 'code-chip' }, model), btn, actions, out);
+  },
 
   buildPersonas() {
     const rowsWrap = el('div', { class: 'col' });

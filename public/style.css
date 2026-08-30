@@ -623,7 +623,7 @@ details.think .think-body {
 /* ===== Settings ===== */
 .endpoint-row {
     display: grid;
-    grid-template-columns: 1fr 2fr 110px 80px auto;
+    grid-template-columns: 1fr 2fr 110px 80px 90px auto 32px;
     gap: 8px;
     align-items: center;
 }

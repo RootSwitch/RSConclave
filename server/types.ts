@@ -9,6 +9,13 @@ export interface Endpoint {
   baseUrl: string; // e.g. "http://10.0.0.5:11434", no trailing slash
   kind: EndpointKind;
   defaultKeepAlive?: string; // "5m" | "0" | ...
+  /*
+   * How much VRAM the card in this box has. Nothing reads it during a normal
+   * run; it exists so context measurement has a budget, because an HTTP client
+   * cannot see the card the way nvidia-smi can. Stated once here rather than
+   * asked for on every measurement.
+   */
+  vramGb?: number;
   // Display names keyed by real model id ("qwen3-coder:30b" -> "Alibaba
   // qwen3-coder"). Cosmetic only: every API call, session record and export
   // carries the real id, so renames never invalidate history.

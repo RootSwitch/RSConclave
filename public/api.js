@@ -56,6 +56,13 @@ const Api = {
   putPresets: (p) => Api._put('/api/presets', p),
   getModels: (endpointId) => Api._json(`/api/models?endpointId=${encodeURIComponent(endpointId)}`),
   getModelInfo: (endpointId) => Api._json(`/api/model-info?endpointId=${encodeURIComponent(endpointId)}`),
+  // Slow by nature: two model loads on the box. No timeout is set here on
+  // purpose - a cold 30B on a spinning disk can take minutes, and cutting it
+  // off client-side would abandon work the box is still doing.
+  measureCtx: (endpointId, model, assumeEmpty) =>
+    Api._post('/api/measure-ctx', { endpointId, model, assumeEmpty }),
+  applyNumCtx: (endpointId, model, numCtx) =>
+    Api._post('/api/measure-ctx/apply', { endpointId, model, numCtx }),
 
   listSessions: () => Api._json('/api/sessions'),
   searchSessions: (q) => Api._json(`/api/search?q=${encodeURIComponent(q)}`),
