@@ -34,7 +34,8 @@
 #   --low           small probe context      (default: 2048)
 #   --high          large probe context      (default: 8192)
 #   --assume-empty  budget against total VRAM rather than what is free now
-#   --apply         bake the recommended num_ctx into the model via ollama create
+#   --apply         bake the recommended num_ctx into the model, via the daemon's
+#                   own /api/create - HTTP only, no ollama CLI needed anywhere
 #
 # Example:
 #   ./measure-ctx.sh qwen3-coder:30b --vram 24 --apply
@@ -70,6 +71,16 @@ done
 
 [ -n "$MODEL" ] || { echo "usage: $0 MODEL [--host URL] [--vram GB]" >&2; exit 2; }
 command -v curl >/dev/null || { echo "curl is required" >&2; exit 1; }
+
+# /api/ps and /api/tags always report a fully qualified name, so a model asked
+# for as "gemma3" comes back as "gemma3:latest" and an exact match on what was
+# typed finds nothing - the run then dies at the end with "could not read
+# /api/ps", after both slow probe loads have already happened. Requests still
+# send MODEL, which the daemon resolves either way; only matching uses PS_NAME.
+case "$MODEL" in
+    *:*) PS_NAME=$MODEL ;;
+    *)   PS_NAME=$MODEL:latest ;;
+esac
 
 # Both vendors report total and free; print "total_mb free_mb". The ROCm
 # columns are found by header name rather than position, because the order
@@ -126,7 +137,7 @@ unload() {
 # just looking like a disappointing number.
 others() {
     curl -sf -m 30 "$HOST/api/ps" 2>/dev/null | sed 's/{"name":/\n&/g' |
-        sed -n 's/.*{"name":"\([^"]*\)".*/\1/p' | grep -Fxv "$MODEL" || true
+        sed -n 's/.*{"name":"\([^"]*\)".*/\1/p' | grep -Fxv "$PS_NAME" || true
 }
 
 if [ -z "$VRAM_GB" ]; then
@@ -152,7 +163,7 @@ if [ -z "$VRAM_GB" ]; then
     # rather than sleeping a guessed interval.
     i=0
     while [ $i -lt 20 ]; do
-        curl -sf -m 10 "$HOST/api/ps" 2>/dev/null | grep -qF "\"$MODEL\"" || break
+        curl -sf -m 10 "$HOST/api/ps" 2>/dev/null | grep -qF "\"$PS_NAME\"" || break
         i=$((i + 1))
         sleep 1
     done
@@ -200,7 +211,7 @@ probe() { # $1 = num_ctx -> prints "total_bytes vram_bytes"
     # One line per model entry. Splitting on every "{" instead would put
     # "size" and "size_vram" on different lines, because details:{...} sits
     # between them.
-    curl -sf -m 30 "$HOST/api/ps" | sed 's/{"name":/\n&/g' | grep -F "\"$MODEL\"" | head -1 |
+    curl -sf -m 30 "$HOST/api/ps" | sed 's/{"name":/\n&/g' | grep -F "\"$PS_NAME\"" | head -1 |
         sed -n 's/.*"size":\([0-9]*\).*"size_vram":\([0-9]*\).*/\1 \2/p'
 }
 
@@ -220,9 +231,9 @@ HIGH_OUT=$(probe "$HIGH")
 # release the card again; leaving a model pinned is rude on a shared box
 unload
 
-[ -n "$LOW_OUT" ] && [ -n "$HIGH_OUT" ] || { echo "could not read /api/ps for $MODEL" >&2; exit 1; }
+[ -n "$LOW_OUT" ] && [ -n "$HIGH_OUT" ] || { echo "could not read /api/ps for $PS_NAME" >&2; exit 1; }
 
-REPORT=$(awk -v lo="$LOW" -v hi="$HIGH" -v lo_out="$LOW_OUT" -v hi_out="$HIGH_OUT" -v vram="$VRAM_GB" -v model="$MODEL" -v trained="$TRAINED" -v basis="$BASIS" '
+REPORT=$(awk -v lo="$LOW" -v hi="$HIGH" -v lo_out="$LOW_OUT" -v hi_out="$HIGH_OUT" -v vram="$VRAM_GB" -v model="$MODEL" -v trained="$TRAINED" -v basis="$BASIS" -v host="$HOST" '
 # 262144 reads as noise next to 1216512 - a missing digit hides in plain
 # sight, which is how a 1.2M recommendation got waved through as "about
 # 100k-ish". Numbers keep their raw form (the --apply grep depends on the
@@ -291,8 +302,15 @@ BEGIN {
         printf "  Sized against an ASSUMED %d GB - VRAM could not be detected.\n", vram;
     else
         printf "  Sized against the %d GB free at measurement time.\n", vram;
-    printf "\nSet it per seat in RSConclave, or bake it in for every client:\n";
-    printf "  printf '"'"'FROM %s\\nPARAMETER num_ctx %d\\n'"'"' > mf && ollama create %s -f mf\n", model, p, model;
+    # The manual form is curl rather than `ollama create` because it works
+    # from anywhere the measurement itself worked: a box that can reach 11434
+    # and has no CLI installed can still bake the number in.
+    printf "\nSet it per seat in RSConclave, or bake it in for every client of this daemon\n";
+    printf "by re-running with --apply, which is exactly:\n";
+    # This whole awk program is inside shell single quotes, so every literal
+    # single quote in the output has to leave and re-enter them: '"'"'.
+    printf "  curl -X POST %s/api/create -H '"'"'content-type: application/json'"'"' \\\n", host;
+    printf "    -d '"'"'{\"model\":\"%s\",\"from\":\"%s\",\"parameters\":{\"num_ctx\":%d},\"stream\":false}'"'"'\n", model, model, p;
 }')
 printf '%s\n' "$REPORT"
 
@@ -305,18 +323,40 @@ if [ "$APPLY" -eq 1 ]; then
         echo "apply: nothing to apply - the model does not fit this budget at any context" >&2
         exit 1
     fi
-    command -v ollama >/dev/null 2>&1 || { echo "apply: the ollama CLI is required for --apply" >&2; exit 1; }
-    MF=$(mktemp)
-    printf 'FROM %s\nPARAMETER num_ctx %s\n' "$MODEL" "$REC" > "$MF"
-    # Same name on purpose: every client of this daemon gets the new default.
-    # OLLAMA_HOST is set from --host so the CLI talks to the same box we measured.
+    # POST /api/create rather than shelling out to `ollama create`. The CLI was
+    # this script's only local dependency and the only step that could not run
+    # from a machine which reaches the daemon over the network and nothing
+    # else - the normal arrangement for a headless GPU box driven from
+    # somewhere, and the exact case a remote --host exists to serve.
+    #
+    # Same name on purpose: every client of this daemon gets the new default,
+    # not just the app. FROM names a model rather than a file, so the daemon
+    # resolves it out of its own blobs - a new manifest over the same weights,
+    # with nothing uploaded and nothing re-quantised.
     echo ""
-    echo "applying: ollama create $MODEL (num_ctx $REC)"
-    if ! OLLAMA_HOST="$HOST" ollama create "$MODEL" -f "$MF"; then
-        rm -f "$MF"
-        echo "apply: ollama create failed" >&2
-        exit 1
-    fi
-    rm -f "$MF"
-    echo "done - $MODEL now defaults to num_ctx $REC for every client"
+    echo "applying: num_ctx $REC to $MODEL on $HOST"
+
+    create_post() {
+        curl -s -m 300 -X POST "$HOST/api/create" \
+            -H 'content-type: application/json' -d "$1" 2>/dev/null
+    }
+
+    # Ollama renamed these fields; older daemons take a flat Modelfile string
+    # under "modelfile". Trying the current shape first and falling back keeps
+    # one script working against a fleet that upgrades at different times.
+    OUT=$(create_post "{\"model\":\"$MODEL\",\"from\":\"$MODEL\",\"parameters\":{\"num_ctx\":$REC},\"stream\":false}")
+    case "$OUT" in
+        *'"status":"success"'*) ;;
+        *)
+            OUT2=$(create_post "{\"name\":\"$MODEL\",\"modelfile\":\"FROM $MODEL\\nPARAMETER num_ctx $REC\",\"stream\":false}")
+            case "$OUT2" in
+                *'"status":"success"'*) ;;
+                *)
+                    echo "apply: create failed on $HOST" >&2
+                    [ -n "$OUT" ]  && echo "  current shape: $OUT" >&2
+                    [ -n "$OUT2" ] && echo "  legacy shape : $OUT2" >&2
+                    exit 1 ;;
+            esac ;;
+    esac
+    echo "done - $MODEL now defaults to num_ctx $REC for every client of $HOST"
 fi

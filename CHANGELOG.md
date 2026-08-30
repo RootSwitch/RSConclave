@@ -31,6 +31,23 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**`measure-ctx.sh --apply` no longer needs the ollama CLI.** It shelled out to
+`ollama create`, which made the one step that writes something the only step
+that could not run from a machine reaching the daemon over the network and
+nothing else - the normal arrangement for a headless GPU box driven from a
+different host, and precisely the case `--host` exists to serve. It now POSTs
+to the daemon's own `/api/create`, falling back to the older request shape for
+daemons that predate the rename, so the whole script is HTTP end to end and
+needs nothing installed but curl. The printed manual equivalent is a curl
+command for the same reason.
+
+**A model named without a tag no longer fails at the finish line.** `/api/ps`
+reports fully qualified names, so asking for `gemma3` had it come back as
+`gemma3:latest` and an exact match on what was typed found nothing - the run
+died with "could not read /api/ps" *after* both slow probe loads had already
+happened. Requests still send the name as given, which the daemon resolves
+either way; only the matching qualifies it.
+
 **`measure-ctx.sh` no longer sizes a remote model against the local card.**
 Every step of that script is HTTP against `--host` - the probes, the trained
 maximum, even `--apply`, since a Modelfile whose `FROM` is a model name is
