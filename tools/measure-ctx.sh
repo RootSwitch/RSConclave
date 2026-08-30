@@ -27,6 +27,9 @@
 #                          [--assume-empty] [--apply]
 #
 #   --host          Ollama base URL   (default: http://127.0.0.1:11434)
+#                   A remote host is fine - every step here is HTTP, --apply
+#                   included - but --vram becomes required, because VRAM
+#                   detection can only see the card in this machine.
 #   --vram          usable VRAM budget in GB - skips detection entirely
 #   --low           small probe context      (default: 2048)
 #   --high          large probe context      (default: 8192)
@@ -83,6 +86,34 @@ gpu_mem() {
     fi
 }
 
+# Everything else in this script talks to --host over HTTP, so it works fine
+# against a remote daemon - including --apply, since a Modelfile whose FROM is
+# a model NAME is resolved by the daemon out of its own blobs, with nothing
+# uploaded. gpu_mem is the single exception: nvidia-smi and rocm-smi describe
+# the card in THIS machine. Point --host at another box and detection would
+# quietly budget a remote model against the local card and print a confident
+# number for a machine it never looked at. A wrong answer that looks right is
+# worse than no answer, so a remote host has to state its budget.
+# Stripping the port with a trailing-":digits" regex cannot be done after the
+# IPv6 brackets come off: it then eats the ":1" of "::1". The forms are
+# distinguished up front instead.
+host_of() {
+    h=$(printf '%s' "$1" | sed -e 's|^[a-zA-Z][a-zA-Z0-9+.-]*://||' -e 's|/.*$||')
+    case "$h" in
+        \[*\]*) h=${h#\[}; h=${h%%\]*} ;; # [::1]:11434
+        *:*:*)  ;;                        # bare IPv6, which cannot carry a port
+        *)      h=${h%:*} ;;              # host:port, or a bare host untouched
+    esac
+    printf '%s' "$h"
+}
+
+is_local_host() {
+    case "$1" in
+        ''|localhost|localhost.localdomain|127.*|::1|0.0.0.0) return 0 ;;
+    esac
+    [ "$1" = "$(hostname 2>/dev/null)" ]
+}
+
 # Unload the model being measured BEFORE reading free VRAM. Left resident from
 # an earlier run it would count against its own budget, and the script would
 # recommend a window sized for the space left over beside itself.
@@ -99,6 +130,18 @@ others() {
 }
 
 if [ -z "$VRAM_GB" ]; then
+    TARGET=$(host_of "$HOST")
+    if ! is_local_host "$TARGET"; then
+        echo "$TARGET is a different machine, and VRAM detection only sees this one." >&2
+        echo "Everything else here works remotely - probing, the trained maximum, and" >&2
+        echo "--apply - so state the budget and the rest of the run is unchanged:" >&2
+        echo "" >&2
+        echo "  $0 $MODEL --host $HOST --vram GB" >&2
+        echo "" >&2
+        echo "Its free VRAM, from that box:  nvidia-smi --query-gpu=memory.free --format=csv" >&2
+        echo "Or run this script on that box, where detection works." >&2
+        exit 2
+    fi
     unload
     # Freeing VRAM is not instant; wait for the model to actually leave /api/ps
     # rather than sleeping a guessed interval.

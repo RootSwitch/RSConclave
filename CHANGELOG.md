@@ -31,6 +31,17 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**`measure-ctx.sh` no longer sizes a remote model against the local card.**
+Every step of that script is HTTP against `--host` - the probes, the trained
+maximum, even `--apply`, since a Modelfile whose `FROM` is a model name is
+resolved by that daemon out of its own blobs with nothing uploaded. VRAM
+detection was the one exception: `nvidia-smi` and `rocm-smi` describe the
+machine the script runs on. Pointed at another box it would quietly budget
+against the wrong card and print a confident recommendation for hardware it
+never looked at, which is worse than refusing. A non-local `--host` now
+requires `--vram`, and says so along with the command to read free VRAM off
+that box.
+
 **Skip pressed mid-answer no longer stops the whole council.** Skip worked
 when it landed while a model was still loading, and behaved exactly like
 Cancel when it landed while tokens were flowing - which is when it is usually
