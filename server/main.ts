@@ -15,7 +15,8 @@ import * as engine from './engine.ts';
 import * as rt from './roundtable.ts';
 import * as chat from './chat.ts';
 import * as auth from './auth.ts';
-import { sessionToMarkdown } from './exportMd.ts';
+import { councilToFiles, sessionToMarkdown } from './exportMd.ts';
+import { makeZip } from './zip.ts';
 import { searchSessions } from './search.ts';
 import type { AppConfig, Document, Endpoint, Persona, Presets, Session } from './types.ts';
 import {
@@ -608,19 +609,48 @@ route('DELETE', '/api/sessions/:id', (req, res, params) => {
   store.deleteSession(me, params.id);
   sendJson(res, 200, { ok: true });
 });
-route('GET', '/api/sessions/:id/export.md', (req, res, params) => {
+route('GET', '/api/sessions/:id/export.md', (req, res, params, query) => {
   const me = userOf(req);
   const s = store.loadSession<Session>(me, params.id);
   if (!s) throw new HttpError(404, 'session not found');
   // Personas ride along so a chat export can carry its full system prompt,
   // memory layer included - the transcript alone shows a model that knows
   // things with no trace of how it knew them.
-  const md = sessionToMarkdown(s, store.loadUser<Persona[]>(me, 'personas', DEFAULT_PERSONAS));
+  // ?reasoning=0 drops <think> blocks. Default on: the reasoning is often the
+  // interesting part for a human reader, and only costly when the reader is
+  // another model.
+  const wantReasoning = query.get('reasoning') !== '0';
+  const md = sessionToMarkdown(s, store.loadUser<Persona[]>(me, 'personas', DEFAULT_PERSONAS),
+    { reasoning: wantReasoning });
   res.writeHead(200, {
     'content-type': 'text/markdown; charset=utf-8',
     'content-disposition': `attachment; filename="${s.id}.md"`,
   });
   res.end(md);
+});
+
+/*
+ * A council as one file per answer, zipped.
+ *
+ * The combined export of a ten-member run over a large document is hundreds of
+ * kilobytes of parallel restatement - too big to hand to a model in one piece,
+ * and flattened by a consolidator that is itself smaller than the material.
+ * Separate files let each answer be read, or fed onward, on its own.
+ */
+route('GET', '/api/sessions/:id/export.zip', (req, res, params, query) => {
+  const me = userOf(req);
+  const s = store.loadSession<Session>(me, params.id);
+  if (!s) throw new HttpError(404, 'session not found');
+  if (s.mode !== 'council') throw new HttpError(400, 'per-answer export is a council thing');
+  const files = councilToFiles(s, { reasoning: query.get('reasoning') !== '0' });
+  if (!files.length) throw new HttpError(400, 'this council has no answers yet');
+  const zip = makeZip(files);
+  res.writeHead(200, {
+    'content-type': 'application/zip',
+    'content-disposition': `attachment; filename="${s.id}-answers.zip"`,
+    'content-length': String(zip.length),
+  });
+  res.end(zip);
 });
 route('POST', '/api/sessions/:id/fork', async (req, res, params) => {
   const { entryId } = await readJsonBody(req);

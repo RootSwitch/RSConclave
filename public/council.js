@@ -28,7 +28,13 @@ const Council = {
           titleEl,
           renameButton(session.id, () => App.session.title, (t) => { App.session.title = t; titleEl.textContent = t; }),
           el('span', { class: 'grow' }),
-          el('a', { href: `/api/sessions/${session.id}/export.md`, download: '' }, el('button', {}, 'Export markdown')),
+          /*
+           * Reasoning is kept by default and dropped on request, because who
+           * is reading decides: for a person the reasoning is often the
+           * interesting part, and for a model it is context spent on
+           * deliberation that already reached its conclusion below it.
+           */
+          exportControls(session),
           el('a', { href: `/api/sessions/${session.id}`, target: '_blank' }, el('button', {}, 'View JSON')),
           cloneButton(session),
         ),

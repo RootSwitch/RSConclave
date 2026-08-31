@@ -2270,3 +2270,38 @@ async function init() {
 }
 
 init();
+
+/*
+ * Export controls: the combined markdown every mode has, plus - for a council -
+ * one file per answer in a zip.
+ *
+ * The zip exists because a ten-member run over a large document produces an
+ * export too big to hand to a model in one piece, and because a consolidator
+ * smaller than the material flattens exactly the differences worth reading.
+ * Separate files let each answer be read, or fed onward, on its own.
+ */
+function exportControls(session) {
+  const withReasoning = el('input', { type: 'checkbox' });
+  withReasoning.checked = true;
+  const q = () => (withReasoning.checked ? '' : '?reasoning=0');
+  const mdLink = el('a', { href: `/api/sessions/${session.id}/export.md`, download: '' },
+    el('button', {}, 'Export markdown'));
+  const zipLink = session.mode === 'council'
+    ? el('a', { href: `/api/sessions/${session.id}/export.zip`, download: '' },
+        el('button', { title: 'One markdown file per member answer, zipped' }, 'Export per answer'))
+    : null;
+  // The href is rebuilt on toggle rather than read at click time, because a
+  // plain <a download> has no hook that runs before the browser follows it.
+  const sync = () => {
+    mdLink.href = `/api/sessions/${session.id}/export.md${q()}`;
+    if (zipLink) zipLink.href = `/api/sessions/${session.id}/export.zip${q()}`;
+  };
+  withReasoning.addEventListener('change', sync);
+  sync();
+  return el('span', { class: 'row' },
+    mdLink, zipLink,
+    el('label', { class: 'row muted', style: 'gap: 4px',
+      title: 'Reasoning is the model thinking aloud. Useful to read, wasteful to feed to another model.' },
+      withReasoning, 'reasoning'),
+  );
+}

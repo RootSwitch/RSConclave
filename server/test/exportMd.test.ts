@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sessionToMarkdown } from '../exportMd.ts';
+import { councilToFiles, sessionToMarkdown } from '../exportMd.ts';
 import type { Session, TranscriptEntry } from '../types.ts';
 
 function entry(partial: Partial<TranscriptEntry>): TranscriptEntry {
@@ -166,4 +166,39 @@ test('export: a council that DID consolidate still names its consolidator', () =
   assert.ok(!/Consolidator: none/.test(md));
   // And the section itself stays findable by name.
   assert.match(md, /### Consolidation - judge:12b/);
+});
+
+test('export: a turn that is all reasoning explains itself when reasoning is dropped', () => {
+  /*
+   * A thinking model that hits its output cap mid-<think> produces an entry
+   * with no answer at all. Exported with reasoning off, that was a file with
+   * an empty Answer section and nothing to explain it - indistinguishable from
+   * a model that simply said nothing. Found on a real 2-seat council run with
+   * maxTokens 120.
+   */
+  const s = councilSession([
+    entry({ kind: 'user', speaker: 'You', text: 'why?' }),
+    entry({ speaker: 'alpha:7b', text: '<think>still deliberating when the cap hit</think>', truncated: true }),
+  ]);
+  const [file] = councilToFiles(s, { reasoning: false });
+  assert.match(file.text, /hit its output limit before writing an answer/);
+  assert.match(file.text, /Re-export with reasoning included/);
+  assert.match(file.text, /stopped at its output limit/);
+
+  // With reasoning kept, the reasoning itself is the explanation.
+  const [withR] = councilToFiles(s, { reasoning: true });
+  assert.match(withR.text, /still deliberating when the cap hit/);
+  assert.ok(!/Re-export with reasoning included/.test(withR.text));
+});
+
+test('export: per-answer files carry the prompt and disambiguate a repeated model', () => {
+  const s = councilSession([
+    entry({ kind: 'user', speaker: 'You', text: 'the question' }),
+    entry({ speaker: 'alpha:7b', model: 'alpha:7b', text: 'first seat' }),
+    entry({ speaker: 'alpha:7b', model: 'alpha:7b', text: 'second seat, same model' }),
+  ]);
+  const files = councilToFiles(s);
+  assert.deepEqual(files.map((f) => f.name), ['01-alpha-7b.md', '02-alpha-7b-2.md']);
+  // Every file stands alone: an answer without its question cannot be checked.
+  for (const f of files) assert.match(f.text, /## Prompt\n\nthe question/);
 });

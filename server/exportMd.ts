@@ -1,4 +1,5 @@
 // Session → readable markdown.
+import { safeName } from './zip.ts';
 import type { ChatConfig, CouncilConfig, Persona, PipelineConfig, RoundtableConfig, Session } from './types.ts';
 import { tallyBallot, tallyToMarkdown } from './vote.ts';
 import { buildSystemPrompt } from './chat.ts';
@@ -34,7 +35,22 @@ function splitThinking(text: string): { thinking: string[]; body: string } {
   return { thinking, body };
 }
 
-export function sessionToMarkdown(session: Session, personas: Persona[] = []): string {
+/*
+ * `reasoning: false` drops <think> blocks from the output.
+ *
+ * Not a size optimisation. Reasoning is the model talking to itself, and when
+ * an export is being fed to another model it is context spent on deliberation
+ * that already reached its conclusion in the text below it. Kept by default,
+ * because when a person is the reader the reasoning is often the interesting
+ * part.
+ */
+export interface ExportOptions {
+  reasoning?: boolean;
+}
+
+export function sessionToMarkdown(
+  session: Session, personas: Persona[] = [], opts: ExportOptions = {},
+): string {
   const lines: string[] = [];
   lines.push(`# ${session.title}`);
   lines.push('');
@@ -128,13 +144,102 @@ export function sessionToMarkdown(session: Session, personas: Persona[] = []): s
     const { thinking, body } = e.kind === 'user'
       ? { thinking: [] as string[], body: e.text.trim() }
       : splitThinking(e.text);
-    for (const t of thinking) {
-      lines.push('> **reasoning**');
-      for (const l of t.split('\n')) lines.push(('> ' + l).trimEnd());
-      lines.push('');
+    if (opts.reasoning !== false) {
+      for (const t of thinking) {
+        lines.push('> **reasoning**');
+        for (const l of t.split('\n')) lines.push(('> ' + l).trimEnd());
+        lines.push('');
+      }
     }
     lines.push(balanceFences(body));
     lines.push('');
   }
   return lines.join('\n');
+}
+
+/**
+ * A council split into one markdown file per answer, for feeding them to
+ * something else separately.
+ *
+ * The motivating case: ten members over a large document, where each member
+ * restating the source in its own words IS the value rather than noise, and a
+ * consolidator - especially a weaker one - would flatten exactly the
+ * differences worth reading. One combined export is also simply too big to
+ * hand to a model in one piece.
+ *
+ * Every file repeats the prompt. They are going to be read apart from each
+ * other, and an answer without its question is a document nobody can check.
+ */
+export function councilToFiles(
+  session: Session, opts: ExportOptions = {},
+): Array<{ name: string; text: string }> {
+  const prompt = session.entries.find((e) => e.kind === 'user')?.text?.trim() ?? '';
+  const answers = session.entries.filter((e) => e.kind === 'participant' || e.kind === 'consolidation');
+  const seen = new Map<string, number>();
+
+  return answers.map((e, i) => {
+    const { thinking, body } = splitThinking(e.text);
+    const isSynthesis = e.kind === 'consolidation';
+    const lines: string[] = [];
+    lines.push(`# ${isSynthesis ? 'Consolidation' : 'Council member'}: ${e.speaker}`);
+    lines.push('');
+    lines.push(`- Session: ${session.title}`);
+    lines.push(`- Model: ${e.model ?? e.speaker}`);
+    lines.push(`- Exported: ${session.updatedAt}`);
+    if (e.error) lines.push(`- ⚠ ${e.error === 'cancelled' ? 'stopped part-way - incomplete' : e.error}`);
+    // Hitting the output cap is not an error, but a reader comparing answers
+    // has to know which ones were cut off rather than finished.
+    if (e.truncated) lines.push('- ⚠ stopped at its output limit, not because it had finished');
+    lines.push('');
+    if (prompt) {
+      lines.push('## Prompt');
+      lines.push('');
+      lines.push(prompt);
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+    }
+    if (opts.reasoning !== false && thinking.length) {
+      lines.push('## Reasoning');
+      lines.push('');
+      for (const t of thinking) {
+        for (const l of t.split('\n')) lines.push(('> ' + l).trimEnd());
+        lines.push('');
+      }
+    }
+    lines.push('## Answer');
+    lines.push('');
+    /*
+     * A thinking model that hits its output cap mid-reasoning produces an
+     * entry that is ALL reasoning and no answer. Exported with reasoning
+     * dropped, that became a file with an empty Answer section and nothing to
+     * explain it - which reads as a model that said nothing, rather than one
+     * that was cut off before it got to the point.
+     */
+    if (!body.trim()) {
+      lines.push(thinking.length
+        ? '_(nothing but reasoning - this turn hit its output limit before writing an answer.'
+          + (opts.reasoning === false ? ' Re-export with reasoning included to see how far it got.)_' : ')_')
+        : '_(empty)_');
+    } else {
+      lines.push(balanceFences(body));
+    }
+    lines.push('');
+
+    /*
+     * Numbered by position so the archive lists in run order rather than
+     * alphabetically, and suffixed on a repeat: the same model can sit twice
+     * in one council, which is what the clone button is for, and two files
+     * called the same thing is one file.
+     */
+    const base = safeName(e.model ?? e.speaker);
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    const ordinal = String(i + 1).padStart(2, '0');
+    const suffix = n > 1 ? `-${n}` : '';
+    return {
+      name: `${ordinal}-${isSynthesis ? 'consolidation-' : ''}${base}${suffix}.md`,
+      text: lines.join('\n'),
+    };
+  });
 }

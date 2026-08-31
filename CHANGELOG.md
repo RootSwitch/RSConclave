@@ -31,6 +31,29 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**Export a council as one file per answer, and choose whether reasoning comes
+with it.** A ten-member run over a large document produces a combined export
+too big to hand to a model in one piece - and a consolidator smaller than the
+material flattens exactly the differences worth reading. **Export per answer**
+gives a zip of one markdown file per member, each repeating the prompt so it
+stands alone, numbered in run order and suffixed when the same model sat
+twice. A **reasoning** checkbox beside both export buttons decides whether
+<think> blocks ride along: keep them when a person is reading, drop them when
+the destination is another model and the deliberation has already reached its
+conclusion in the text below it.
+
+The zip is written here rather than pulled in: node:zlib supplies deflate and
+crc32, so the archive costs no dependency. Model ids carry colons and slashes,
+which Windows refuses in a filename, so entry names are sanitised - and the
+test extracts with a real unzipper rather than trusting the writer to grade
+itself.
+
+**A turn that is all reasoning now says so.** A thinking model that hits its
+output cap mid-<think> produces an entry with no answer at all; exported with
+reasoning dropped, that was an empty Answer section with nothing to explain
+it, indistinguishable from a model that said nothing. It now names the cause
+and points at the re-export that would show how far the model got.
+
 **An exported council no longer claims a consolidator that never ran.** The
 consolidator is recorded on every council even when consolidation is switched
 off, because the session view can still run it later - but the export header
