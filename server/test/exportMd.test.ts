@@ -116,3 +116,54 @@ test('export: without a persona the system prompt section is unchanged', () => {
   assert.ok(md.includes('Only this.'));
   assert.ok(!md.includes('memories evolve'), 'no caveat when nothing evolves');
 });
+
+function councilSession(entries: TranscriptEntry[]): Session {
+  return {
+    id: 'c1',
+    mode: 'council',
+    title: 'A council',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    status: 'done',
+    config: {
+      prompt: 'review this',
+      members: [{ endpointId: 'e', model: 'alpha:7b' }, { endpointId: 'e', model: 'beta:9b' }],
+      consolidator: { endpointId: 'e', model: 'judge:12b', template: '{{RESPONSES}}' },
+      skipConsolidation: true,
+    },
+    entries,
+  } as Session;
+}
+
+test('export: a council with no consolidation does not name a consolidator', () => {
+  /*
+   * The consolidator is recorded even when consolidation is switched off, so
+   * the header used to announce a synthesis that was never written. On a long
+   * export the reader then scrolls to the end looking for it and finds the
+   * last member's answer sitting exactly where a synthesis would be - which is
+   * how one gets read as the other. Reported from a real 232 KB review.
+   */
+  const md = sessionToMarkdown(councilSession([
+    entry({ kind: 'user', speaker: 'You', text: 'review this' }),
+    entry({ speaker: 'alpha:7b', text: 'alpha says' }),
+    entry({ speaker: 'beta:9b', text: 'beta says, and ends with a Summary heading' }),
+  ]));
+  assert.ok(!/Consolidator: judge:12b/.test(md), md.slice(0, 400));
+  assert.match(md, /Consolidator: none/);
+  assert.match(md, /there is no synthesis/);
+  // The members are still listed - only the claim of a synthesis is dropped.
+  assert.match(md, /Members: alpha:7b, beta:9b/);
+});
+
+test('export: a council that DID consolidate still names its consolidator', () => {
+  const s = councilSession([
+    entry({ kind: 'user', speaker: 'You', text: 'review this' }),
+    entry({ speaker: 'alpha:7b', text: 'alpha says' }),
+    entry({ kind: 'consolidation', speaker: 'judge:12b', text: 'the synthesis' }),
+  ]);
+  const md = sessionToMarkdown(s);
+  assert.match(md, /Consolidator: judge:12b/);
+  assert.ok(!/Consolidator: none/.test(md));
+  // And the section itself stays findable by name.
+  assert.match(md, /### Consolidation - judge:12b/);
+});

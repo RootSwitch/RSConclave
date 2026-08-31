@@ -31,6 +31,16 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**An exported council no longer claims a consolidator that never ran.** The
+consolidator is recorded on every council even when consolidation is switched
+off, because the session view can still run it later - but the export header
+printed it unconditionally, announcing a synthesis that was never written. On
+a long document the reader then scrolls to the end looking for it and finds
+the last member's answer sitting exactly where a synthesis would be, which is
+how one gets read as the other. The header now reports what happened: either
+the consolidator that wrote the synthesis, or that none was run and every
+section is one member answering independently.
+
 **A model added on the box now shows up without a reload.** The model list was
 cached for the life of the page, and only two things cleared it: reloading, or
 saving Settings - because save() wipes those caches as a side effect. That made

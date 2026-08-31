@@ -51,7 +51,20 @@ export function sessionToMarkdown(session: Session, personas: Persona[] = []): s
   if (session.mode === 'council') {
     const c = session.config as CouncilConfig;
     lines.push(`Members: ${c.members.map((m) => m.model).join(', ')}`);
-    lines.push(`Consolidator: ${c.consolidator.model}`);
+    /*
+     * What HAPPENED, not what was configured. The consolidator is recorded on
+     * every council even when consolidation is switched off, because the
+     * session view can still run it later - so printing it unconditionally
+     * announced a synthesis that was never written. A reader then hunts for it
+     * at the end of the document and finds the last member's answer sitting
+     * where a synthesis would be, which is exactly how one gets mistaken for
+     * the other. Costly on a long export, where nobody scrolls back to check.
+     */
+    const synthesised = session.entries.some((e) => e.kind === 'consolidation');
+    lines.push(synthesised
+      ? `Consolidator: ${c.consolidator.model}`
+      : 'Consolidator: none - no consolidation was run. Every section below is one '
+        + 'member answering the prompt independently; there is no synthesis.');
     if (c.ballot?.length) {
       lines.push('');
       lines.push(tallyToMarkdown(tallyBallot(c.ballot, session.entries)).trimEnd());
