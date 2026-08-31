@@ -230,11 +230,20 @@ const Council = {
 
   /** memberRows: ordered array of {endpointId, model, cb, tempInput, ctxInput, rowEl, isClone} */
   addMemberRow(endpointId, model, opts = {}) {
+    /*
+     * `model` may be a profile's picker value. realModel is what /api/show
+     * knows, so every context lookup for this row asks about the weights
+     * rather than the saved variation - a profile has no entry of its own.
+     */
+    const profile = profileFor(endpointId, model);
+    const realModel = profile ? profile.model : model;
     const cb = el('input', { type: 'checkbox' });
     if (opts.checked) cb.checked = true;
     const temp = el('input', { type: 'number', step: '0.1', min: '0', max: '2', placeholder: 'temp' });
     if (opts.temp !== undefined) temp.value = opts.temp;
-    const ctx = ctxInput(opts.numCtx);
+    // The profile's window becomes the row's starting value, so the seat shows
+    // the number the profile exists to carry instead of an empty box.
+    const ctx = ctxInput(opts.numCtx ?? profile?.params?.num_ctx);
     ollamaOnly(ctx, endpointId); // fixed endpoint for this row, so no re-sync needed
     const maxOut = maxTokensInput(opts.maxTokens);
     /*
@@ -252,7 +261,7 @@ const Council = {
     // Every row carries its own fit tag, clones included: a clone shares the
     // model but has its own ctx box, so it can be sized differently.
     const fitEl = el('span', { class: 'fit-tag' });
-    const row = { endpointId, model, cb, personaInput: persona, tempInput: temp, ctxInput: ctx, maxOutInput: maxOut, fitEl, isClone: !!opts.isClone };
+    const row = { endpointId, model, realModel, cb, personaInput: persona, tempInput: temp, ctxInput: ctx, maxOutInput: maxOut, fitEl, isClone: !!opts.isClone };
     persona.addEventListener('change', () => this.refreshFit());
     // Typing a bigger window must clear the warning it caused, or the fix
     // looks like it did nothing until the next render.
@@ -278,9 +287,11 @@ const Council = {
     // With the spacer between name and ctx, a widescreen row put half a
     // meter of blank space exactly where the eye tracks name-to-window.
     row.rowEl = el('div', { class: `model-item${opts.isClone ? ' clone' : ''}` },
-      cb, el('span', { title: modelLabel(endpointId, model) === model ? null : model },
-        (opts.isClone ? '↳ ' : '') + modelLabel(endpointId, model)),
-      opts.isClone ? null : ctxTag(endpointId, model),
+      // A profile shows its own name and hovers the model it wraps; the ctx tag
+      // reads the real model, which is the only thing /api/show knows about.
+      cb, el('span', { title: profile ? `profile of ${realModel}` : (modelLabel(endpointId, model) === model ? null : model) },
+        (opts.isClone ? '↳ ' : '') + (profile ? profile.name : modelLabel(endpointId, model))),
+      opts.isClone ? null : ctxTag(endpointId, realModel, profile?.params?.num_ctx),
       fitEl,
       el('span', { class: 'grow' }),
       persona, temp, ctx, maxOut, ...controls);
@@ -310,7 +321,7 @@ const Council = {
       // A seat wearing a persona is sent that persona and its memories on top
       // of the prompt, so it needs more room than a bare one.
       const verdict = fitVerdict(needed + personaTokens(row.personaInput.value),
-        App.modelInfo(row.endpointId, row.model), row.ctxInput.value);
+        App.modelInfo(row.endpointId, row.realModel ?? row.model), row.ctxInput.value);
       renderFitTag(row.fitEl, verdict);
       if (row.cb.checked) {
         checked++;
@@ -368,9 +379,9 @@ const Council = {
     };
 
     for (const row of rows) {
-      raise(row.ctxInput, App.modelInfo(row.endpointId, row.model),
+      raise(row.ctxInput, App.modelInfo(row.endpointId, row.realModel ?? row.model),
         needed + personaTokens(row.personaInput.value) + REPLY_HEADROOM_TOKENS,
-        modelLabel(row.endpointId, row.model));
+        modelLabel(row.endpointId, row.realModel ?? row.model));
     }
     if (f.consolidateEl.checked) {
       const [cEp, cModel] = (f.consolidatorSel.value || '|').split('|');
@@ -432,9 +443,9 @@ const Council = {
       if (!row.cb.checked) continue;
       members.push({
         endpointId: row.endpointId,
-        model: row.model,
+        ...seatFrom(row.endpointId, row.model,
+          genParams(row.tempInput.value, row.ctxInput.value, row.maxOutInput.value)),
         personaId: row.personaInput.value || undefined,
-        params: genParams(row.tempInput.value, row.ctxInput.value, row.maxOutInput.value),
       });
     }
     const [cEndpoint, cModel] = (f.consolidatorSel.value || '|').split('|');
@@ -443,9 +454,11 @@ const Council = {
       members,
       consolidator: {
         endpointId: cEndpoint,
-        model: cModel,
+        // The value carries endpoint|model, and model may be a profile. Profile
+        // ids never contain '|', so the split above is unaffected.
+        ...seatFrom(cEndpoint, cModel,
+          genParams(undefined, f.consolidatorCtxEl.value, f.consolidatorMaxOutEl.value)),
         template: f.templateEl.value,
-        params: genParams(undefined, f.consolidatorCtxEl.value, f.consolidatorMaxOutEl.value),
       },
       documentIds: f.docState.ids.length ? f.docState.ids : undefined,
       unloadBetweenModels: f.unloadEl.checked,

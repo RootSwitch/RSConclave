@@ -16,10 +16,37 @@ export interface Endpoint {
    * asked for on every measurement.
    */
   vramGb?: number;
+  /*
+   * Saved variations on this endpoint's models: the same weights under a
+   * different name with different parameters, usually a smaller num_ctx.
+   *
+   * Two problems in one. A window baked into the model is a single global
+   * answer, but the right window is not global: a seat that is alone on the
+   * card wants everything it can hold, and the same model in a five-way
+   * council wants a fraction of that so the others can stay resident beside
+   * it. And typing the number into each seat every time is exactly the
+   * friction presets exist to remove everywhere else.
+   *
+   * Setup-time only. What a session records is the resolved model and the
+   * resolved params, never a profile id - so deleting a profile can never
+   * strand a transcript, and history stays readable without this config.
+   */
+  profiles?: ModelProfile[];
   // Display names keyed by real model id ("qwen3-coder:30b" -> "Alibaba
   // qwen3-coder"). Cosmetic only: every API call, session record and export
   // carries the real id, so renames never invalidate history.
   aliases?: Record<string, string>;
+}
+
+/*
+ * One saved model variation. `model` is the real id the daemon knows; `name`
+ * is what the pickers show instead of the alias.
+ */
+export interface ModelProfile {
+  id: string;
+  model: string;
+  name: string;
+  params?: GenParams;
 }
 
 export interface AppConfig {

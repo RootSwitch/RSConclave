@@ -144,7 +144,7 @@ const Settings = {
       if (ep?.kind) els.kind.value = ep.kind;
       const testResult = el('div', { class: 'test-result', style: 'grid-column: 1 / -1' });
       const id = ep?.id ?? 'ep' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-      const rowObj = { id, els, testResult, aliases: { ...(ep?.aliases ?? {}) } };
+      const rowObj = { id, els, testResult, aliases: { ...(ep?.aliases ?? {}) }, profiles: (ep?.profiles ?? []).map((p) => ({ ...p, params: { ...(p.params ?? {}) } })) };
 
       // Alias editor: one input per discovered model. Aliases are display
       // names only - sessions and API calls keep the real id - so renaming is
@@ -169,14 +169,65 @@ const Settings = {
                   if (v) rowObj.aliases[m] = v;
                   else delete rowObj.aliases[m];
                 });
-                return el('div', { class: 'row' }, el('span', { class: 'code-chip' }, m), input);
-              }), el('div', { class: 'muted' }, 'Names apply after Save.'));
+                /*
+                 * A profile is the same weights under another name with its own
+                 * window - the council seat that must share the card, next to
+                 * the solo seat that should have everything. Kept in the app
+                 * rather than baked into the model, so one box can offer both
+                 * at once and deleting a profile cannot strand a transcript.
+                 */
+                const profWrap = el('div', { class: 'col', style: 'margin-left: 18px' });
+                const drawProfiles = () => {
+                  profWrap.replaceChildren(...rowObj.profiles.filter((pr) => pr.model === m).map((pr) => {
+                    const nameIn = el('input', { value: pr.name, placeholder: 'profile name', style: 'flex: 1' });
+                    nameIn.addEventListener('input', () => { pr.name = nameIn.value; });
+                    const ctxIn = el('input', {
+                      type: 'number', min: '256', step: '1024', style: 'width: 110px',
+                      placeholder: 'num_ctx', value: pr.params?.num_ctx ?? '',
+                    });
+                    ctxIn.addEventListener('input', () => {
+                      const v = parseInt(ctxIn.value, 10);
+                      pr.params = pr.params || {};
+                      if (Number.isFinite(v) && v > 0) pr.params.num_ctx = v; else delete pr.params.num_ctx;
+                    });
+                    return el('div', { class: 'row' },
+                      el('span', { class: 'muted' }, '↳'), nameIn, ctxIn,
+                      el('button', { class: 'danger mini', title: 'remove this profile', onclick: () => {
+                        rowObj.profiles = rowObj.profiles.filter((x) => x !== pr);
+                        drawProfiles();
+                      } }, '✕'));
+                  }));
+                };
+                drawProfiles();
+                const addBtn = el('button', {
+                  class: 'mini',
+                  title: 'Save a variation of this model with its own context window',
+                  onclick: () => {
+                    const info = App.modelInfo(id, m);
+                    rowObj.profiles.push({
+                      id: 'pf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+                      model: m,
+                      name: `${modelLabel(id, m)} (small ctx)`,
+                      // Seeded from the model's own window rather than blank, so
+                      // the number to edit is the one being varied from.
+                      params: { num_ctx: Math.min(16384, info?.numCtx || 16384) },
+                    });
+                    drawProfiles();
+                  },
+                }, '＋');
+                return el('div', { class: 'col' },
+                  el('div', { class: 'row' }, el('span', { class: 'code-chip' }, m), input, addBtn),
+                  profWrap);
+              }), el('div', { class: 'muted' },
+                'Names and profiles apply after Save. A profile is the same model under another '
+                + 'name with its own context window - useful for a council seat that has to share '
+                + 'the card with four others.'));
             } catch (err) {
               aliasWrap.replaceChildren(el('span', { class: 'error-text' }, err.message));
             }
           }
         },
-      }, 'Model names');
+      }, 'Models');
 
       /*
        * Context sizing, in the app, because the shell script that does this is
@@ -307,6 +358,10 @@ const Settings = {
           defaultKeepAlive: r.els.keepAlive.value.trim() || undefined,
           vramGb: Number(r.els.vram.value) > 0 ? Number(r.els.vram.value) : undefined,
           aliases: Object.keys(r.aliases).length ? r.aliases : undefined,
+          // Nameless profiles are dropped rather than stored: an empty name
+          // would render as a blank option in every picker in the app.
+          profiles: r.profiles?.filter((p) => p.name.trim()).length
+            ? r.profiles.filter((p) => p.name.trim()) : undefined,
         }));
       await Api.putConfig({ endpoints });
       App.config.endpoints = endpoints;

@@ -606,20 +606,80 @@ function modelLabel(endpointId, model) {
  * aliases: rename "qwen3-coder:30b" to "Alibaba qwen3-coder" and it files
  * under A, exactly where you will look for it.
  */
+/*
+ * Saved model variations for an endpoint. A profile is the same weights under
+ * another name with its own parameters - usually a smaller num_ctx, because
+ * the right window is not one number: a model alone on the card wants
+ * everything it can hold, and the same model in a five-way council wants a
+ * fraction so the others stay resident beside it.
+ */
+function profilesOf(endpointId) {
+  return endpointOf(endpointId)?.profiles ?? [];
+}
+
+/** The picker value for a profile. Prefixed so it cannot collide with a model id. */
+function profileValue(p) {
+  return `profile:${p.id}`;
+}
+
+function profileFor(endpointId, pickerValue) {
+  if (typeof pickerValue !== 'string' || !pickerValue.startsWith('profile:')) return null;
+  const id = pickerValue.slice('profile:'.length);
+  return profilesOf(endpointId).find((p) => p.id === id) ?? null;
+}
+
+/*
+ * Turn a picker value plus whatever the seat's own boxes say into the model and
+ * params a config should carry.
+ *
+ * Resolved HERE, at setup, and never stored: a session records the real model
+ * and the real numbers, so deleting a profile cannot strand a transcript and an
+ * exported session needs no config to be readable. The seat's own boxes win,
+ * because a profile is a starting point rather than a lock - typing 8192 into a
+ * seat wearing a 64k profile means 8192.
+ */
+function seatFrom(endpointId, pickerValue, params) {
+  const prof = profileFor(endpointId, pickerValue);
+  if (!prof) return { model: pickerValue, params };
+  const merged = { ...(prof.params ?? {}), ...(params ?? {}) };
+  return { model: prof.model, params: Object.keys(merged).length ? merged : undefined };
+}
+
+/**
+ * Pickable entries for an endpoint: its real models, plus any profiles, sorted
+ * together so a profile sits wherever its name puts it rather than in a
+ * second-class group at the bottom.
+ */
 function displayModels(endpointId, models) {
-  return models
-    .map((id) => ({ id, label: modelLabel(endpointId, id) }))
+  const real = models.map((id) => ({ id, label: modelLabel(endpointId, id) }));
+  const profs = profilesOf(endpointId)
+    .filter((p) => models.includes(p.model))
+    .map((p) => ({ id: profileValue(p), label: p.name, profile: p }));
+  return [...real, ...profs]
     .sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
 }
 
 /** Standard picker option: alias + ctx suffix; the real id in the tooltip. */
 function modelOption(endpointId, m) {
+  /*
+   * A profile has no /api/show entry of its own - it is a saved variation on a
+   * real model - so the info is looked up under the model it wraps, and the
+   * window shown is the profile's own rather than the model's baked default.
+   * Showing the baked number beside a profile named for its smaller window is
+   * the one thing that would make profiles actively confusing.
+   */
+  const realId = m.profile ? m.profile.model : m.id;
+  const info = App.modelInfo(endpointId, realId);
+  const shown = m.profile
+    ? { ...(info ?? {}), numCtx: m.profile.params?.num_ctx ?? info?.numCtx ?? null }
+    : info;
   return el('option', {
     value: m.id,
     // The detail text opens with the real id, so it also covers what the old
     // alias-only tooltip was for: seeing what a renamed model really is.
-    title: modelDetailText(endpointId, m.id, App.modelInfo(endpointId, m.id)),
-  }, m.label + ctxSuffix(App.modelInfo(endpointId, m.id)));
+    title: (m.profile ? `profile of ${realId}
+` : '') + modelDetailText(endpointId, realId, info),
+  }, m.label + ctxSuffix(shown));
 }
 
 /** Short select-option suffix: " - 4k ctx" (marks server-default windows with *) */
@@ -632,11 +692,25 @@ function ctxSuffix(info) {
 }
 
 /** Span that shows a model's context info; fills in when /api/show data lands. */
-function ctxTag(endpointId, model) {
-  const span = el('span', { class: 'ctx-tag', dataset: { ctxFor: `${endpointId}|${model}` },
-    title: 'configured window / trained maximum ("default" = Ollama server default, usually 4k)' });
+function ctxTag(endpointId, model, overrideNumCtx) {
+  /*
+   * overrideNumCtx is for a profile seat. /api/show only knows the real model,
+   * so the trained maximum and quantization must be looked up under it - but
+   * the CONFIGURED window shown has to be the profile's, or a seat named
+   * "(council 16k)" advertises the model's baked 68k right beside its own ctx
+   * box reading 16384, and contradicts itself.
+   *
+   * data-ctx-for is dropped when overriding, because fillCtxTags refreshes
+   * these from the model's info as /api/show lands and would overwrite the
+   * override moments after it was set.
+   */
+  const span = el('span', {
+    class: 'ctx-tag',
+    dataset: overrideNumCtx ? {} : { ctxFor: `${endpointId}|${model}` },
+    title: 'configured window / trained maximum ("default" = Ollama server default, usually 4k)',
+  });
   const info = App.modelInfo(endpointId, model);
-  if (info) span.textContent = ctxLabel(info);
+  if (info) span.textContent = ctxLabel(overrideNumCtx ? { ...info, numCtx: overrideNumCtx } : info);
   return span;
 }
 

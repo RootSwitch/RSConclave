@@ -31,6 +31,24 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**Model profiles: the same model saved twice with different windows.** A baked
+num_ctx is one global answer, but the right window is not global - a model
+alone on the card wants everything it can hold, and the same model in a
+five-way council wants a fraction so the others stay resident beside it. The
+KV cache is allocated up front, not as the conversation grows, so a 128k seat
+costs 128k of VRAM to answer "what's 2+2".
+
+Settings > an endpoint > **Models** now has a **＋** beside each model that
+saves a variation: its own name, its own context window. Profiles appear in
+every picker sorted among the real models, showing their own window rather
+than the model's baked default, and in council they arrive as their own
+seat - which is the shape the ＋-a-seat button already had.
+
+Resolved at setup and never stored: a session records the real model id and
+the real numbers, so deleting a profile cannot strand a transcript and an
+exported session stays readable without the config that made it. A seat's own
+ctx box still wins, because a profile is a starting point rather than a lock.
+
 **Measure all, so a fleet is one button rather than thirteen.** Context sizing
 made you press Measure per model and wait on each, which is why measuring a
 whole box meant dropping to the shell script. The panel now runs the list in

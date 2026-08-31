@@ -345,10 +345,11 @@ const Chat = {
     try {
       const started = await withBoxFree(() => Api.chatStart({
         endpointId: s.endpoint.value,
-        model: s.model.value,
+        // A profile resolves to its real model and its saved params here, so
+        // the session records numbers rather than a reference to config.
+        ...seatFrom(s.endpoint.value, s.model.value, genParams(s.temp.value, s.ctx.value, s.maxOut.value)),
         personaId: s.persona.value || undefined,
         systemPrompt: s.system.value.trim() || undefined,
-        params: genParams(s.temp.value, s.ctx.value, s.maxOut.value),
         documentIds: s.docState.ids.length ? s.docState.ids : undefined,
         // Recorded so the summarise fold can offer the same summariser again.
         presetId: s.presetSel.value || undefined,

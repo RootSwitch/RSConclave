@@ -212,6 +212,31 @@ route('PUT', '/api/config', async (req, res) => {
     // turn into a confidently wrong context recommendation later.
     const vram = Number(raw?.vramGb);
     if (Number.isFinite(vram) && vram > 0 && vram <= 1024) out.vramGb = vram;
+    /*
+     * Validated rather than trusted, like aliases: this is stored config that
+     * a picker reads back, and a malformed entry there breaks the setup form
+     * for every mode at once. num_ctx is the only param worth carrying today,
+     * but the whole GenParams shape is accepted so a profile can also pin a
+     * temperature without a second round of plumbing.
+     */
+    if (Array.isArray(raw?.profiles)) {
+      const profiles = [];
+      for (const p of raw.profiles.slice(0, 100)) {
+        const pid = String(p?.id ?? '').trim();
+        const pmodel = String(p?.model ?? '').trim();
+        const pname = String(p?.name ?? '').trim().slice(0, 120);
+        if (!pid || !pmodel || !pname) continue;
+        const out2: Record<string, unknown> = { id: pid, model: pmodel, name: pname };
+        const pp: Record<string, number> = {};
+        for (const k of ['temperature', 'top_p', 'num_ctx', 'maxTokens'] as const) {
+          const v = Number((p?.params ?? {})[k]);
+          if (Number.isFinite(v) && v > 0) pp[k] = v;
+        }
+        if (Object.keys(pp).length) out2.params = pp;
+        profiles.push(out2);
+      }
+      if (profiles.length) out.profiles = profiles;
+    }
     if (raw?.aliases && typeof raw.aliases === 'object') {
       const aliases: Record<string, string> = {};
       for (const [k, v] of Object.entries(raw.aliases as Record<string, unknown>)) {

@@ -175,9 +175,9 @@ const Pipeline = {
       stages.push({
         name: s.els.name.value.trim() || undefined,
         endpointId: s.els.endpoint.value,
-        model: s.els.model.value,
+        ...seatFrom(s.els.endpoint.value, s.els.model.value,
+          genParams(s.els.temp.value, s.els.ctx.value, s.els.maxOut.value)),
         template: s.els.template.value,
-        params: genParams(s.els.temp.value, s.els.ctx.value, s.els.maxOut.value),
       });
     }
     return stages;

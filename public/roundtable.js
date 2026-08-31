@@ -419,10 +419,13 @@ const Roundtable = {
         name,
         kind: human ? 'human' : undefined,
         endpointId: human ? '' : p.els.endpoint.value,
-        model: human ? '' : p.els.model.value,
+        // A human seat has no model and no params; a model seat resolves its
+        // profile the same way every other mode does.
+        ...(human ? { model: '', params: undefined }
+          : seatFrom(p.els.endpoint.value, p.els.model.value,
+              genParams(p.els.temp.value, p.els.ctx.value, p.els.maxOut.value))),
         personaId: (!human && p.els.persona.value) || undefined,
         overlayPrompt: (!human && p.els.overlay.value.trim()) || undefined,
-        params: human ? undefined : genParams(p.els.temp.value, p.els.ctx.value, p.els.maxOut.value),
         color: p.els.color.value,
       });
     }
