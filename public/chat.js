@@ -570,3 +570,17 @@ const Chat = {
  * every chat set up in a session - the same trap the council checklist had.
  */
 document.addEventListener('model-info-loaded', () => Chat.refreshSetupFit());
+
+/*
+ * A model pulled on the box while this form was open appears without a reload.
+ * The selection is preserved across the re-fill: the list changing under
+ * someone mid-choice must not silently move what they picked.
+ */
+document.addEventListener('models-changed', async (e) => {
+  const s = Chat.setup;
+  if (!s || s.endpoint.value !== e.detail.endpointId) return;
+  const keep = s.model.value;
+  await s.fillModels();
+  if ([...s.model.options].some((o) => o.value === keep)) s.model.value = keep;
+  Chat.refreshSetupFit();
+});

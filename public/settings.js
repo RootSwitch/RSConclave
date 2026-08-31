@@ -310,6 +310,37 @@ const Settings = {
         },
       }, 'Context sizing');
 
+      /*
+       * Pulling a model on the box left it invisible here until a page reload
+       * - or until Settings was saved, because save() clears the client model
+       * caches as a side effect. That made "write your config to disk" the
+       * working answer to "I added a model", which nobody would guess. The
+       * pickers now revalidate behind their cache on their own; this is the
+       * explicit version, and the only way to also drop the context info,
+       * which is what changes when a num_ctx is re-baked on the box.
+       */
+      const refreshBtn = el('button', {
+        title: 'Re-read the model list and context info for this endpoint now',
+        onclick: async () => {
+          const was = refreshBtn.textContent;
+          refreshBtn.disabled = true;
+          refreshBtn.textContent = 'reading…';
+          try {
+            delete App.modelsByEndpoint[id];
+            delete App.modelInfoByEndpoint[id];
+            const { models } = await Api.getModels(id);
+            App.modelsByEndpoint[id] = models;
+            await App.loadModelInfo(id).catch(() => {});
+            document.dispatchEvent(new CustomEvent('models-changed', { detail: { endpointId: id, models } }));
+            testResult.textContent = `✓ ${models.length} model${models.length === 1 ? '' : 's'}`;
+          } catch (err) {
+            testResult.textContent = '✗ ' + err.message;
+          }
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = was;
+        },
+      }, 'Refresh');
+
       const testBtn = el('button', { onclick: async () => {
         testResult.textContent = 'testing…';
         try {
@@ -341,7 +372,7 @@ const Settings = {
         // Delete gets its own column rather than riding in the button span:
         // the span wraps when the actions outgrow it, and the button that
         // wrapped onto a line of its own was the destructive one.
-        el('span', { class: 'row' }, testBtn, aliasBtn, ctxBtn), delBtn,
+        el('span', { class: 'row' }, testBtn, refreshBtn, aliasBtn, ctxBtn), delBtn,
         testResult, aliasWrap, ctxWrap);
       rowsWrap.append(row);
       rows.push(rowObj);

@@ -31,6 +31,19 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**A model added on the box now shows up without a reload.** The model list was
+cached for the life of the page, and only two things cleared it: reloading, or
+saving Settings - because save() wipes those caches as a side effect. That made
+"write your config to disk" the working answer to "I pulled a new model", which
+nobody would guess and which nothing in the app said. Pickers now serve the
+cached list immediately and refetch behind it, raising an event only when the
+list actually changed, so opening any setup form picks up a new model at the
+cost of one background request and no waiting - even when a box is off.
+
+There is also a **Refresh** button per endpoint, next to Test. It is the only
+thing that drops the cached context info too, which is what changes when a
+num_ctx is re-baked on the box rather than when a model is added.
+
 **Model profiles: the same model saved twice with different windows.** A baked
 num_ctx is one global answer, but the right window is not global - a model
 alone on the card wants everything it can hold, and the same model in a

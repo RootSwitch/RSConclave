@@ -764,3 +764,13 @@ const Council = {
  * behind every time a council was configured.
  */
 document.addEventListener('model-info-loaded', () => Council.refreshFit());
+
+/*
+ * Council lists every endpoint's models as rows, so a new model on any box
+ * means a new row. Rebuilt wholesale because the rows ARE the list; the
+ * checked seats are restored by populateModels from the form state it keeps.
+ */
+document.addEventListener('models-changed', () => {
+  if (App.session || !Council.form?.modelListEl) return; // only the setup form
+  Council.populateModels();
+});

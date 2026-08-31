@@ -1440,13 +1440,50 @@ const App = {
     return this.session && this.runState.sessionId === this.session.id;
   },
 
+  /*
+   * Stale while revalidating.
+   *
+   * The list is cached for the life of the page because pickers ask for it
+   * constantly, but a model pulled on the box after the page loaded then
+   * stayed invisible until a reload - or until Settings was saved, which
+   * clears these caches as a side effect. That made "write your config to
+   * disk" the documented way to see a new model, which nobody would guess
+   * and which this app never said out loud.
+   *
+   * So the cached answer comes back immediately, and a refetch runs behind
+   * it. Only a list that actually CHANGED raises an event, so the common
+   * case costs one background request and re-renders nothing.
+   */
   async loadModels(endpointId, force = false) {
-    if (!force && this.modelsByEndpoint[endpointId]) return this.modelsByEndpoint[endpointId];
+    const cached = this.modelsByEndpoint[endpointId];
+    if (!force && cached) {
+      this.revalidateModels(endpointId);
+      return cached;
+    }
     const { models } = await Api.getModels(endpointId);
     this.modelsByEndpoint[endpointId] = models;
     // context info loads in the background; pickers re-label when it lands
     this.loadModelInfo(endpointId).catch(() => {});
     return models;
+  },
+
+  /** Refetch behind a cached list; announce only a real change. */
+  revalidateModels(endpointId) {
+    if (this._revalidating?.has(endpointId)) return; // one in flight is enough
+    (this._revalidating ??= new Set()).add(endpointId);
+    Api.getModels(endpointId)
+      .then(({ models }) => {
+        const before = this.modelsByEndpoint[endpointId] ?? [];
+        if (before.length === models.length && before.every((m, i) => m === models[i])) return;
+        this.modelsByEndpoint[endpointId] = models;
+        // The info map is keyed by model, so a new model has no entry yet.
+        delete this.modelInfoByEndpoint[endpointId];
+        this.loadModelInfo(endpointId).catch(() => {});
+        document.dispatchEvent(new CustomEvent('models-changed', { detail: { endpointId, models } }));
+      })
+      // A box that is off must not turn a working picker into an error.
+      .catch(() => {})
+      .finally(() => this._revalidating.delete(endpointId));
   },
 
   async loadModelInfo(endpointId) {
