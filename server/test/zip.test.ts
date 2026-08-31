@@ -29,7 +29,12 @@ test('zip: a real archive that a real unzipper can read', () => {
   const files = [
     { name: '01-alpha.md', text: '# Alpha\n\n' + 'compressible '.repeat(500) },
     { name: '02-beta.md', text: 'tiny' }, // deflate would grow this; must store
-    { name: '03-unicode.md', text: 'em dash test — ünïcödé ✓' },
+    // Non-ASCII on purpose: entry names and content are flagged UTF-8 in the
+    // header, and a mis-set flag shows up as mojibake on extraction. No em
+    // dash, because charcheck forbids one in a tracked file - which it could
+    // not tell me until this file WAS tracked, hence the check passing before
+    // the commit and failing after it.
+    { name: '03-unicode.md', text: 'ünïcödé ✓ 日本語' },
   ];
   const zip = makeZip(files);
   assert.equal(zip.readUInt32LE(0), 0x04034b50, 'starts with a local file header');
