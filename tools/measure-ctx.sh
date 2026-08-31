@@ -381,12 +381,22 @@ printf '%s\n' "$REPORT"
 # extrapolated and starts being confirmed.
 REC=$(printf '%s\n' "$REPORT" | sed -n 's/.*Recommended num_ctx *: *\([0-9][0-9]*\).*/\1/p')
 if [ -n "$REC" ] && [ "$REC" -gt "$HIGH" ] 2>/dev/null; then
-    resident_at() { # num_ctx -> "1" resident, "0" spilling
-        probe "$1" | awk '{ print ($2 >= $1 * 0.999 && $1 > 0) ? 1 : 0 }'
+    # Three answers, not two. An empty /api/ps read - a transient miss, or a
+    # model still settling after a long load - printed NOTHING, which is not
+    # equal to "0", so the caller's `= "0"` test fell through to the success
+    # branch and announced "confirmed resident" having verified nothing. A
+    # check that cannot fail closed is not a check.
+    resident_at() { # num_ctx -> yes | no | unknown
+        probe "$1" | awk 'NF >= 2 { print ($2 >= $1 * 0.999 && $1 > 0) ? "yes" : "no"; seen = 1 }
+                          END { if (!seen) print "unknown" }'
     }
     echo ""
     echo "verifying at num_ctx=$REC ..."
-    if [ "$(resident_at "$REC")" = "0" ]; then
+    VERDICT=$(resident_at "$REC")
+    if [ "$VERDICT" = "unknown" ]; then
+        echo "  could not read /api/ps after loading at $REC - NOT verified."
+        echo "  Leaving the arithmetic's answer in place; re-run to check it."
+    elif [ "$VERDICT" = "no" ]; then
         LO=$HIGH; HI=$REC
         # Four steps narrows the usual gap below the 4k the answer is rounded
         # to; more would cost a model load each for precision nobody reports.
@@ -399,7 +409,10 @@ if [ -n "$REC" ] && [ "$REC" -gt "$HIGH" ] 2>/dev/null; then
             # Reported after the probe, not before it: printing a fixed
             # "spilled" up front described the PREVIOUS step and called
             # every resident midpoint a failure.
-            if [ "$(resident_at "$MID")" = "1" ]; then LO=$MID; echo "resident"; else HI=$MID; echo "spills"; fi
+            V=$(resident_at "$MID")
+            # Only an explicit "yes" moves the floor up. An unreadable probe
+            # must narrow from the cautious side, never widen the claim.
+            if [ "$V" = "yes" ]; then LO=$MID; echo "resident"; else HI=$MID; echo "$V"; fi
             i=$((i + 1))
         done
         echo ""
