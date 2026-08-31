@@ -205,13 +205,53 @@ const Settings = {
             // Filtered, not passed straight through: el() drops null children
             // but replaceChildren() stringifies them, so a skipped element
             // renders the word "null" in the panel.
+            const modelRows = models.map((m) => this.ctxRow(id, m));
+            /*
+             * Measuring a fleet one button at a time, waiting on each, is the
+             * job people were dropping to the shell script for. Sequential on
+             * purpose and not merely for politeness: the server keeps one
+             * measurement per user and cancels the previous when a new one
+             * starts, so firing them together would kill all but the last.
+             */
+            const progress = el('span', { class: 'muted' });
+            const allBtn = el('button', {}, 'Measure all');
+            let stop = false;
+            allBtn.onclick = async () => {
+              if (stop === 'running') { // a second press stops the batch
+                stop = true;
+                Api.cancelMeasure().catch(() => {});
+                return;
+              }
+              stop = 'running';
+              allBtn.textContent = 'Stop';
+              for (const r of modelRows) r.ctx.btn.disabled = true;
+              let done = 0;
+              for (const r of modelRows) {
+                if (stop === true) break;
+                progress.textContent = `${++done} of ${modelRows.length}: ${r.ctx.model}`;
+                r.scrollIntoView({ block: 'nearest' });
+                // Never rejects: the row reports its own errors inline, and one
+                // unreachable model must not abandon the rest of the fleet.
+                await r.ctx.run();
+              }
+              progress.textContent = stop === true
+                ? `stopped after ${done - 1} of ${modelRows.length}`
+                : `measured ${modelRows.length}. Bake the ones you want.`;
+              allBtn.textContent = 'Measure all';
+              for (const r of modelRows) r.ctx.btn.disabled = false;
+              stop = false;
+            };
+
             ctxWrap.replaceChildren(...[
-              el('span', { class: 'muted' },
-                'Loads each model twice to find its real cost per token, so allow a minute or two per model. ' +
-                'Nothing is written unless you press Bake in.'),
+              el('div', { class: 'row' },
+                el('span', { class: 'muted', style: 'flex: 1' },
+                  'Loads each model twice to find its real cost per token, then loads once more at its own '
+                  + 'answer to check the card really takes it. Allow a minute or two per model. '
+                  + 'Nothing is written unless you press Bake in.'),
+                allBtn, progress),
               !Number(els.vram.value) ? el('span', { class: 'error-text' },
                 'Set this endpoint\'s VRAM GB above and Save first - there is no way to read the card over HTTP.') : null,
-              ...models.map((m) => this.ctxRow(id, m)),
+              ...modelRows,
             ].filter(Boolean));
           } catch (err) {
             ctxWrap.replaceChildren(el('span', { class: 'error-text' }, err.message));
@@ -323,7 +363,12 @@ const Settings = {
      */
     const GB = (bytes) => (bytes / 1073741824).toFixed(1);
 
-    btn.onclick = async () => {
+    /*
+     * Named rather than inlined into onclick so "Measure all" can drive the
+     * same code path a click does. Two paths would be two behaviours to keep
+     * in step, and the batch is exactly where a divergence would go unseen.
+     */
+    const run = async () => {
       btn.disabled = true;
       actions.replaceChildren();
       // Cancel, because the measurement loads the model twice and a model that
@@ -412,8 +457,14 @@ const Settings = {
       btn.disabled = false;
     };
 
-    return el('div', { class: 'row' },
+    btn.onclick = run;
+    const row = el('div', { class: 'row' },
       el('span', { class: 'code-chip' }, model), btn, actions, out);
+    // The batch needs the runner and the button (to disable it while another
+    // model is being measured - the server cancels an in-flight measurement
+    // when a second one starts, so two at once would silently kill the first).
+    row.ctx = { run, btn, model };
+    return row;
   },
 
   buildPersonas() {

@@ -31,6 +31,16 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**Measure all, so a fleet is one button rather than thirteen.** Context sizing
+made you press Measure per model and wait on each, which is why measuring a
+whole box meant dropping to the shell script. The panel now runs the list in
+sequence, naming the model in progress and scrolling to it, with the per-model
+buttons disabled while it works. Sequential is not politeness: the server keeps
+one measurement per user and cancels the previous when a new one starts, so
+firing them together would kill all but the last. A second press stops the
+batch, cancelling the model in flight and leaving the rest untouched - the
+models already done keep their results.
+
 **A tokens/sec sparkline on chat and roundtable headers.** A rate that halves
 partway through a conversation is the visible symptom of a context window the
 card cannot actually hold - as the transcript grows, layers spill to system RAM
