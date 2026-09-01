@@ -31,6 +31,24 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**Switch an endpoint off when its box is powered down.** A sleeping host does
+not refuse a connection, it never answers - so every form that enumerates
+endpoints pays its full timeout for each one. Measured on a six-host fleet
+with five asleep: 12 seconds each. A checkbox on the endpoint row removes it
+from the pickers and from ON THE BOX until you tick it back, and the council
+form says how many are off rather than reporting each as an error.
+
+Manual rather than inferred, because guessing is wrong in both directions: a
+box that is merely slow gets written off, and a box that just came up stays
+written off until something decides to retry. The person who switched the
+machine on is the one who knows.
+
+**And the council form now asks every endpoint at once.** It awaited each in
+turn, so the timeouts added up: on that same fleet, opening New Council took
+roughly a minute before the first row appeared. Concurrently it is one timeout
+total - 19 seconds with everything enabled, and **1 second** with the sleeping
+boxes switched off.
+
 **Export a council as one file per answer, and choose whether reasoning comes
 with it.** A ten-member run over a large document produces a combined export
 too big to hand to a model in one piece - and a consolidator smaller than the

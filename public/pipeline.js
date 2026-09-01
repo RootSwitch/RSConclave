@@ -138,7 +138,7 @@ const Pipeline = {
     };
     if (preset?.params?.temperature !== undefined) els.temp.value = preset.params.temperature;
 
-    for (const ep of App.config.endpoints) els.endpoint.append(el('option', { value: ep.id }, ep.name));
+    for (const ep of liveEndpoints()) els.endpoint.append(el('option', { value: ep.id }, ep.name));
     ollamaOnly(els.ctx, els.endpoint)(); // options exist now, so the kind is readable
     if (preset?.endpointId) els.endpoint.value = preset.endpointId;
     const fillModels = async () => {

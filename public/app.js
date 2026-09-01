@@ -2305,3 +2305,15 @@ function exportControls(session) {
       withReasoning, 'reasoning'),
   );
 }
+
+/*
+ * The endpoints a setup form should offer: everything not switched off.
+ *
+ * A box that is powered down does not refuse a connection, it fails to answer,
+ * so each one costs the full timeout. Measured on a six-host fleet with five
+ * asleep: 12 seconds each. Skipping them is the difference between a form that
+ * opens and a form you wait a minute for.
+ */
+function liveEndpoints() {
+  return App.config.endpoints.filter((e) => !e.disabled);
+}

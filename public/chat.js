@@ -176,7 +176,7 @@ const Chat = {
     const personaNoteEl = el('span', { class: 'muted' });
     this.setup = { endpoint, model, persona, system, message, temp, ctx, maxOut, errEl, sizeEl, fitEl, presetSel, personaNoteEl, docState };
 
-    for (const ep of App.config.endpoints) endpoint.append(el('option', { value: ep.id }, ep.name));
+    for (const ep of liveEndpoints()) endpoint.append(el('option', { value: ep.id }, ep.name));
     syncCtx(); // options exist now, so the kind is finally knowable
     const fillModels = async () => {
       model.replaceChildren(el('option', {}, 'loading…'));

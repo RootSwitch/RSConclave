@@ -17,6 +17,22 @@ export interface Endpoint {
    */
   vramGb?: number;
   /*
+   * Switched off by hand: skipped by the pickers, by the model discovery every
+   * setup form runs, and by the ON THE BOX panel.
+   *
+   * A home fleet is mostly powered down. An endpoint that is off does not
+   * refuse a connection - it fails to answer at all, so every request against
+   * it costs the full timeout, and the council form enumerates every endpoint
+   * before it can draw a single row. Five sleeping boxes is the better part of
+   * a minute of nothing.
+   *
+   * Manual rather than inferred, because guessing is worse in both directions:
+   * a box that is merely slow gets written off, and a box that just came up
+   * stays written off until something decides to retry. The person switching
+   * the machine on is the one who knows.
+   */
+  disabled?: boolean;
+  /*
    * Saved variations on this endpoint's models: the same weights under a
    * different name with different parameters, usually a smaller num_ctx.
    *

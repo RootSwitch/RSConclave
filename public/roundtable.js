@@ -296,7 +296,7 @@ const Roundtable = {
     if (preset?.overlayPrompt) els.overlay.value = preset.overlayPrompt;
     if (preset?.params?.temperature !== undefined) els.temp.value = preset.params.temperature;
 
-    for (const ep of App.config.endpoints) {
+    for (const ep of liveEndpoints()) {
       els.endpoint.append(el('option', { value: ep.id }, ep.name));
     }
     els.endpoint.append(el('option', { value: '__human' }, '🧑 human (you)'));

@@ -415,14 +415,37 @@ const Council = {
       modelListEl.append(el('span', { class: 'error-text' }, 'No endpoints configured - add one in Settings.'));
       return;
     }
-    for (const ep of App.config.endpoints) {
-      modelListEl.append(el('div', { class: 'endpoint-group-label' }, ep.name));
-      let models = [];
+    const endpoints = liveEndpoints();
+    const off = App.config.endpoints.length - endpoints.length;
+    if (!endpoints.length) {
+      modelListEl.append(el('span', { class: 'error-text' },
+        `Every endpoint is switched off (${off}). Turn one back on in Settings.`));
+      return;
+    }
+
+    /*
+     * Every endpoint at once, not one after another.
+     *
+     * This loop used to await each box in turn, and a box that is powered down
+     * does not refuse a connection - it fails to answer, costing the full
+     * timeout. On a six-host fleet with five asleep that was a minute of blank
+     * form before the first row appeared. Concurrently it is one timeout total,
+     * and switching the sleeping ones off in Settings removes even that.
+     */
+    const results = await Promise.all(endpoints.map(async (ep) => {
       try {
-        models = await App.loadModels(ep.id);
+        const models = await App.loadModels(ep.id);
         await App.loadModelInfo(ep.id).catch(() => {});
+        return { ep, models };
       } catch (err) {
-        modelListEl.append(el('div', { class: 'error-text' }, err.message));
+        return { ep, error: err.message };
+      }
+    }));
+
+    for (const { ep, models, error } of results) {
+      modelListEl.append(el('div', { class: 'endpoint-group-label' }, ep.name));
+      if (error) {
+        modelListEl.append(el('div', { class: 'error-text' }, error));
         continue;
       }
       for (const m of displayModels(ep.id, models)) {
@@ -435,6 +458,12 @@ const Council = {
           title: modelDetailText(ep.id, m.id, App.modelInfo(ep.id, m.id)),
         }, `${m.label} (${ep.name})${ctxSuffix(App.modelInfo(ep.id, m.id))}`));
       }
+    }
+    // Said once, at the bottom, so a deliberately-off box does not read as a
+    // missing one every time the form opens.
+    if (off) {
+      modelListEl.append(el('div', { class: 'muted' },
+        `${off} endpoint${off === 1 ? '' : 's'} switched off in Settings.`));
     }
     this.form.syncConsolidatorCtx(); // the select finally has a value to read
     // Rows exist now, and a cloned session arrives with its prompt already

@@ -208,6 +208,7 @@ route('PUT', '/api/config', async (req, res) => {
     }
     const out: Record<string, unknown> = { id, name, baseUrl, kind };
     if (raw?.defaultKeepAlive !== undefined) out.defaultKeepAlive = String(raw.defaultKeepAlive);
+    if (raw?.disabled) out.disabled = true;
     // Only used by context measurement, and only meaningful as a positive
     // number. A junk value is dropped rather than stored, so a bad edit cannot
     // turn into a confidently wrong context recommendation later.
@@ -369,6 +370,8 @@ route('GET', '/api/ps', async (req, res) => {
   const out: Array<{ id: string; name: string; models?: Array<{ name: string; vramGb: number }>; error?: string }> = [];
   for (const ep of config.endpoints) {
     if (ep.kind !== 'ollama') continue;
+    // A switched-off box would cost this panel the full timeout on every poll.
+    if (ep.disabled) continue;
     try {
       const r = await fetch(`${ep.baseUrl.replace(/\/+$/, '')}/api/ps`, { signal: AbortSignal.timeout(4000) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);

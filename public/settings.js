@@ -131,6 +131,17 @@ const Settings = {
           el('option', { value: 'ollama' }, 'ollama'),
           el('option', { value: 'openai' }, 'openai-compat')),
         keepAlive: el('input', { placeholder: 'keep_alive (5m)', value: ep?.defaultKeepAlive ?? '', style: 'width: 80px' }),
+        /*
+         * Switched off by hand, for a box that is usually powered down. A
+         * sleeping host does not refuse a connection - it never answers - so
+         * every form that enumerates endpoints pays its full timeout. Ticking
+         * this removes it from the pickers and from ON THE BOX until it is
+         * ticked back.
+         */
+        enabled: el('input', {
+          type: 'checkbox',
+          title: 'Untick when this box is powered down: it is then skipped by the pickers and the box panel, instead of costing a timeout',
+        }),
         // Nothing in a normal run reads this. It exists so context measurement
         // has a budget: the app talks to the box over HTTP and cannot see the
         // card the way nvidia-smi can, so the size has to be stated once here
@@ -142,6 +153,7 @@ const Settings = {
         }),
       };
       if (ep?.kind) els.kind.value = ep.kind;
+      els.enabled.checked = !ep?.disabled;
       const testResult = el('div', { class: 'test-result', style: 'grid-column: 1 / -1' });
       const id = ep?.id ?? 'ep' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       const rowObj = { id, els, testResult, aliases: { ...(ep?.aliases ?? {}) }, profiles: (ep?.profiles ?? []).map((p) => ({ ...p, params: { ...(p.params ?? {}) } })) };
@@ -368,7 +380,7 @@ const Settings = {
         () => save().then(() => alert('saved')).catch((e) => alert(e.message)));
 
       const row = el('div', { class: 'endpoint-row' },
-        els.name, els.baseUrl, els.kind, els.keepAlive, els.vram,
+        els.enabled, els.name, els.baseUrl, els.kind, els.keepAlive, els.vram,
         // Delete gets its own column rather than riding in the button span:
         // the span wraps when the actions outgrow it, and the button that
         // wrapped onto a line of its own was the destructive one.
@@ -388,7 +400,8 @@ const Settings = {
           kind: r.els.kind.value,
           defaultKeepAlive: r.els.keepAlive.value.trim() || undefined,
           vramGb: Number(r.els.vram.value) > 0 ? Number(r.els.vram.value) : undefined,
-          aliases: Object.keys(r.aliases).length ? r.aliases : undefined,
+          disabled: r.els.enabled.checked ? undefined : true,
+        aliases: Object.keys(r.aliases).length ? r.aliases : undefined,
           // Nameless profiles are dropped rather than stored: an empty name
           // would render as a blank option in every picker in the app.
           profiles: r.profiles?.filter((p) => p.name.trim()).length
