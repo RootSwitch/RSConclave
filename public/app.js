@@ -313,6 +313,109 @@ function documentTokens(ids) {
 }
 
 /**
+ * A title search against the local wiki named in Settings, for the document
+ * library. Type, pick a title, then add its summary section or the whole
+ * article. onAdd receives a library-shaped {id, name, text, addedAt} and
+ * decides what adding means - saved now (a setup form) or another unsaved
+ * row (Settings) - and may return a status line to show. Returns null when no
+ * wiki is configured, so callers append it unconditionally and el() drops it.
+ *
+ * The server does every fetch. The browser only ever talks to this app.
+ */
+function wikiLookup(onAdd) {
+  if (!App.config.wikiUrl) return null;
+  const input = el('input', { placeholder: 'Look up an article in the local wiki - type a title', style: 'flex: 1', autocomplete: 'off' });
+  const bookSel = el('select', { title: 'Which book to search', hidden: true });
+  const hits = el('div', { class: 'wiki-suggest', hidden: true });
+  const preview = el('div', { class: 'row', hidden: true });
+  const status = el('span', { class: 'muted' });
+  let books = [];
+  let seq = 0;
+  let timer = null;
+  const say = (text, bad) => {
+    status.textContent = text;
+    status.className = bad ? 'error-text' : 'muted';
+  };
+
+  Api.getWiki().then((w) => {
+    books = w.books ?? [];
+    if (w.error || !books.length) {
+      say(w.error || 'The wiki lists no books.', true);
+      input.disabled = true;
+      return;
+    }
+    bookSel.replaceChildren(...books.map((b) => el('option', { value: b.id }, b.title)));
+    bookSel.hidden = books.length < 2;
+  }).catch((e) => say(e.message, true));
+  const bookId = () => bookSel.value || books[0]?.id;
+
+  const search = async () => {
+    const q = input.value.trim();
+    const my = ++seq;
+    preview.hidden = true;
+    if (q.length < 2 || !bookId()) {
+      hits.hidden = true;
+      return;
+    }
+    try {
+      const found = await Api.wikiSuggest(bookId(), q);
+      if (my !== seq) return; // a later keystroke already superseded this one
+      hits.replaceChildren(...(found.length
+        ? found.map((s) => el('button', { class: 'wiki-hit', type: 'button', onclick: () => pick(s) }, s.title))
+        : [el('span', { class: 'muted', style: 'padding: 4px 8px' }, 'No matching titles.')]));
+      hits.hidden = false;
+    } catch (e) {
+      if (my === seq) say(e.message, true);
+    }
+  };
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(search, 250);
+  });
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      hits.querySelector('.wiki-hit')?.click();
+    } else if (ev.key === 'Escape') hits.hidden = true;
+  });
+
+  const pick = async (s) => {
+    hits.hidden = true;
+    say(`Fetching "${s.title}"...`);
+    try {
+      const a = await Api.wikiArticle(bookId(), s.path);
+      say('');
+      const add = async (scope) => {
+        const doc = {
+          id: 'doc' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+          name: a.name,
+          text: a[scope].text,
+          addedAt: new Date().toISOString(),
+        };
+        try {
+          const note = await onAdd(doc);
+          preview.hidden = true;
+          input.value = '';
+          say(note || `Added "${a.name}".`);
+        } catch (e) { say(e.message, true); }
+      };
+      preview.replaceChildren(
+        el('span', {}, a.title),
+        el('span', { class: 'prompt-size' }, a.snapshot ? `snapshot ${a.snapshot}` : 'snapshot date unknown'),
+        el('span', { class: 'grow' }),
+        el('button', { class: 'mini', type: 'button', onclick: () => add('lead') }, `Add summary (about ${fmtK(a.lead.tokens)} tokens)`),
+        el('button', { class: 'mini', type: 'button', onclick: () => add('full') }, `Add full article (about ${fmtK(a.full.tokens)} tokens)`),
+      );
+      preview.hidden = false;
+    } catch (e) { say(e.message, true); }
+  };
+
+  return el('div', { class: 'col wiki-lookup' },
+    el('div', { class: 'row' }, el('label', {}, 'Local wiki'), bookSel, input),
+    hits, preview, status);
+}
+
+/**
  * A fold of checkboxes for attaching reference material to a conversation.
  * One builder for chat and council, so the two cannot drift - and a fold
  * rather than a multi-select because a document's size belongs next to its
@@ -333,29 +436,57 @@ function documentsFold(state, onChange) {
    * memory says "add one in Settings first"), so this is also the two halves
    * of the app agreeing. It disappears for good after the first document.
    */
-  if (!App.documents.length) {
+  /*
+   * A wiki lookup lives in the fold too, when one is configured: saved
+   * straight into the library, since a setup form has no Save button, and
+   * attached, since looking it up here means wanting it here. With a lookup
+   * present the fold renders even over an empty library, because it is then
+   * the way the library stops being empty.
+   */
+  const lookup = wikiLookup(async (doc) => {
+    const documents = [...App.documents, doc];
+    await Api.putDocuments(documents);
+    App.documents = documents;
+    addBox(doc, true);
+    state.ids = [...state.ids, doc.id];
+    sync();
+    onChange?.();
+  });
+  if (!App.documents.length && !lookup) {
     return el('div', { class: 'row' },
       el('span', { class: 'muted' }, 'No reference material in the library yet.'),
       el('button', { class: 'mini', onclick: () => { Settings.mount(); showView('settings'); } }, 'Add one in Settings'),
     );
   }
-  const boxes = App.documents.map((d) => {
+  const boxes = [];
+  const list = el('div', { class: 'col' });
+  const addBox = (d, checked) => {
     const cb = el('input', { type: 'checkbox' });
-    cb.checked = state.ids.includes(d.id);
+    cb.checked = checked ?? state.ids.includes(d.id);
     cb.onchange = () => {
       state.ids = App.documents.filter((x) => (x.id === d.id ? cb.checked : state.ids.includes(x.id))).map((x) => x.id);
       sync();
       onChange?.();
     };
-    return { d, cb };
-  });
+    boxes.push({ d, cb });
+    list.append(el('label', { class: 'row', style: 'gap: 6px' },
+      cb,
+      el('span', {}, d.name),
+      el('span', { class: 'prompt-size' }, `about ${fmtK(estimateTokens(d.text))} tokens`),
+    ));
+  };
+  for (const d of App.documents) addBox(d);
   const summary = el('summary', {}, 'Reference material');
+  const hint = el('span', { class: 'muted' });
   const sync = () => {
     const n = state.ids.length;
     const tok = documentTokens(state.ids);
     summary.textContent = n
       ? `Reference material - ${n} attached, about ${fmtK(tok)} tokens on every turn`
       : 'Reference material (optional)';
+    hint.textContent = App.documents.length
+      ? 'Attached documents ride with every turn of this conversation, verbatim. Manage the library in Settings.'
+      : 'No reference material in the library yet. Look an article up below, or add a document in Settings.';
   };
   sync();
   // A preset or clone rewrites state.ids from outside after the boxes were
@@ -366,15 +497,7 @@ function documentsFold(state, onChange) {
   };
   return el('details', {},
     summary,
-    el('div', { class: 'col' },
-      el('span', { class: 'muted' },
-        'Attached documents ride with every turn of this conversation, verbatim. Manage the library in Settings.'),
-      ...boxes.map(({ d, cb }) => el('label', { class: 'row', style: 'gap: 6px' },
-        cb,
-        el('span', {}, d.name),
-        el('span', { class: 'prompt-size' }, `about ${fmtK(estimateTokens(d.text))} tokens`),
-      )),
-    ),
+    el('div', { class: 'col' }, hint, list, lookup),
   );
 }
 

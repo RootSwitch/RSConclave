@@ -17,6 +17,7 @@ import * as chat from './chat.ts';
 import * as auth from './auth.ts';
 import { councilToFiles, sessionToMarkdown } from './exportMd.ts';
 import { makeZip } from './zip.ts';
+import * as wiki from './wiki.ts';
 import { searchSessions } from './search.ts';
 import type { AppConfig, Document, Endpoint, Persona, Presets, Session } from './types.ts';
 import {
@@ -249,7 +250,9 @@ route('PUT', '/api/config', async (req, res) => {
     }
     return out;
   });
-  store.save('config', { endpoints });
+  // The endpoints form owns only the endpoints; the wiki address saved from
+  // its own form rides through untouched.
+  store.save('config', { ...store.load<AppConfig>('config', { endpoints: [] }), endpoints });
   /*
    * Saving endpoints is the move people make right after changing something
    * about a model - including re-adding an endpoint specifically to force a
@@ -257,6 +260,105 @@ route('PUT', '/api/config', async (req, res) => {
    */
   clearModelInfoCache();
   sendJson(res, 200, { ok: true });
+});
+
+// --- local wiki (title lookups for the document library) ---
+/*
+ * One address, shared like the endpoints are, and fetched from only here: the
+ * browser never talks to the wiki, so the frontend's "every asset from
+ * public/" promise holds, and the server's list of places it will reach grows
+ * by exactly the one Settings names.
+ */
+function wikiUrl(): string {
+  const url = store.load<AppConfig>('config', { endpoints: [] }).wikiUrl ?? '';
+  if (!url) throw new HttpError(400, 'no local wiki is configured - set its address in Settings');
+  return url;
+}
+/** A kiwix book id is a filename stem; anything else is refused before it becomes a URL. */
+function bookParam(query: URLSearchParams): string {
+  const book = (query.get('book') ?? '').trim();
+  if (!/^[A-Za-z0-9_.+-]{1,200}$/.test(book)) throw new HttpError(400, 'book must name a wiki book');
+  return book;
+}
+/** The wiki is another box on the LAN; its failures are reported as such, not as ours. */
+async function fromWiki<T>(work: Promise<T>): Promise<T> {
+  try {
+    return await work;
+  } catch (err: any) {
+    throw new HttpError(502, err?.message ?? String(err));
+  }
+}
+
+route('GET', '/api/wiki', async (req, res, _params, query) => {
+  userOf(req);
+  const url = store.load<AppConfig>('config', { endpoints: [] }).wikiUrl ?? '';
+  if (!url) {
+    sendJson(res, 200, { url: '', books: [] });
+    return;
+  }
+  try {
+    sendJson(res, 200, { url, books: await wiki.listBooks(url, query.get('fresh') === '1') });
+  } catch (err: any) {
+    // In the body rather than as a failed request: an unreachable wiki is a
+    // status for Settings to show, and the form that asked still renders.
+    sendJson(res, 200, { url, books: [], error: err?.message ?? String(err) });
+  }
+});
+route('PUT', '/api/wiki', async (req, res) => {
+  userOf(req);
+  const body = await readJsonBody(req, SMALL_BODY);
+  const url = String(body?.url ?? '').trim().replace(/\/+$/, '');
+  if (url) {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new HttpError(400, 'the wiki address is not a URL');
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new HttpError(400, 'the wiki address must be http or https');
+    }
+  }
+  const config = store.load<AppConfig>('config', { endpoints: [] });
+  if (url) config.wikiUrl = url;
+  else delete config.wikiUrl;
+  store.save('config', config);
+  sendJson(res, 200, { ok: true });
+});
+route('GET', '/api/wiki/suggest', async (req, res, _params, query) => {
+  userOf(req);
+  const url = wikiUrl();
+  const book = bookParam(query);
+  const term = (query.get('q') ?? '').trim().slice(0, 200);
+  if (term.length < 2) {
+    sendJson(res, 200, []);
+    return;
+  }
+  sendJson(res, 200, await fromWiki(wiki.suggestTitles(url, book, term)));
+});
+route('GET', '/api/wiki/article', async (req, res, _params, query) => {
+  userOf(req);
+  const url = wikiUrl();
+  const bookId = bookParam(query);
+  const path = (query.get('path') ?? '').trim().slice(0, 500);
+  if (!path) throw new HttpError(400, 'path must name an article');
+  const book = (await fromWiki(wiki.listBooks(url))).find((b) => b.id === bookId)
+    ?? { id: bookId, title: 'Wiki', snapshot: null, snapshotExact: false, articleCount: null };
+  const article = wiki.articleToText(await fromWiki(wiki.fetchArticleHtml(url, bookId, path)));
+  if (!article.title) article.title = path.replace(/_/g, ' ');
+  // Both scopes come back at once so choosing between them costs no second
+  // trip to the wiki; the sizes are what the choice is made on.
+  const lead = wiki.composeDocument(article, book, 'lead');
+  const full = wiki.composeDocument(article, book, 'full');
+  sendJson(res, 200, {
+    title: article.title,
+    path,
+    name: wiki.documentName(article, book),
+    snapshot: book.snapshot,
+    sections: article.sections,
+    lead: { text: lead, tokens: wiki.documentTokens(lead) },
+    full: { text: full, tokens: wiki.documentTokens(full) },
+  });
 });
 
 // --- personas / presets (per-user: these are someone's writing) ---

@@ -18,6 +18,7 @@
     "erasable": "node tools/erasable-check.js",
     "charcheck": "node tools/charcheck.js",
     "mock": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON dev/mock-ollama.ts",
+    "mock-kiwix": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON dev/mock-kiwix.ts",
     "screenshots": "bash tools/screenshots/run.sh"
   }
 }

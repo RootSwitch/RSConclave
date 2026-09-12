@@ -52,6 +52,11 @@ const Api = {
   putPersonas: (list) => Api._put('/api/personas', list),
   getDocuments: () => Api._json('/api/documents'),
   putDocuments: (list) => Api._put('/api/documents', list),
+  // The local wiki: the server does every fetch, these only ask it to.
+  getWiki: (fresh) => Api._json(`/api/wiki${fresh ? '?fresh=1' : ''}`),
+  putWiki: (url) => Api._put('/api/wiki', { url }),
+  wikiSuggest: (book, q) => Api._json(`/api/wiki/suggest?book=${encodeURIComponent(book)}&q=${encodeURIComponent(q)}`),
+  wikiArticle: (book, path) => Api._json(`/api/wiki/article?book=${encodeURIComponent(book)}&path=${encodeURIComponent(path)}`),
   getPresets: () => Api._json('/api/presets'),
   putPresets: (p) => Api._put('/api/presets', p),
   getModels: (endpointId) => Api._json(`/api/models?endpointId=${encodeURIComponent(endpointId)}`),

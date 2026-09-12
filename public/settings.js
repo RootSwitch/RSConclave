@@ -11,7 +11,7 @@ const Settings = {
     scroll.append(el('h3', { class: 'view-title' }, 'Settings'));
     // Personas last: it is the one block that grows without bound, so
     // everything fixed-size stays reachable without scrolling past it.
-    scroll.append(this.buildAccount(), this.buildUsers(), this.buildEndpoints(), this.buildPersonas(), this.buildDocuments());
+    scroll.append(this.buildAccount(), this.buildUsers(), this.buildEndpoints(), this.buildWiki(), this.buildPersonas(), this.buildDocuments());
     this.root.append(scroll);
   },
 
@@ -730,6 +730,66 @@ const Settings = {
     );
   },
 
+  /* ---------- local wiki ---------- */
+
+  /*
+   * One address for a kiwix-serve, or a proxy in front of one. Shared like
+   * the endpoints are - the server is what fetches from it, so it is the
+   * server's list of places to reach that grows, by exactly this one. Saved
+   * and tested in the same press, because the test runs from the server
+   * against the saved address: there is nothing to test until it is saved.
+   */
+  buildWiki() {
+    const url = el('input', {
+      placeholder: 'http://wiki-box:8080 (kiwix-serve, or a proxy in front of one)',
+      value: App.config.wikiUrl ?? '',
+      style: 'flex: 1',
+    });
+    const msg = el('span', { class: 'muted' });
+    const show = (w) => {
+      msg.className = w.error ? 'error-text' : 'muted';
+      if (w.error) msg.textContent = w.error;
+      else if (!w.url) msg.textContent = 'Not set. The lookup controls stay hidden until it is.';
+      else if (!w.books.length) msg.textContent = 'Reachable, but its catalog lists no books.';
+      else {
+        msg.textContent = w.books.map((b) =>
+          `${b.title}: snapshot ${b.snapshot ?? 'date unknown'}${b.articleCount ? `, ${b.articleCount.toLocaleString()} articles` : ''}`,
+        ).join(' / ');
+      }
+    };
+    const saveBtn = el('button', { class: 'primary' }, 'Save and test');
+    saveBtn.onclick = async () => {
+      try {
+        const value = url.value.trim().replace(/\/+$/, '');
+        await Api.putWiki(value);
+        App.config.wikiUrl = value || undefined;
+        url.value = value;
+        msg.className = 'muted';
+        msg.textContent = value ? 'Reading its catalog...' : '';
+        // The Documents block further down renders its lookup from this
+        // value; tell it, so the control appears without a page reload.
+        document.dispatchEvent(new CustomEvent('wiki-changed'));
+        show(await Api.getWiki(true));
+      } catch (e) { show({ error: e.message }); }
+    };
+    onEnterSubmit([url], () => saveBtn.click());
+    if (App.config.wikiUrl) Api.getWiki().then(show).catch((e) => show({ error: e.message }));
+    else show({ url: '', books: [] });
+    return el('div', { class: 'settings-block' },
+      el('div', { class: 'row' },
+        el('label', {}, 'Local wiki (optional)'),
+        el('span', { class: 'grow' }),
+        saveBtn,
+      ),
+      el('div', { class: 'row' }, url),
+      el('span', { class: 'muted' },
+        'A kiwix-serve, or a proxy in front of one, on your network. The document library and the ' +
+        'Reference material fold can then look articles up by title. The server fetches from this ' +
+        'address; the browser never does.'),
+      msg,
+    );
+  },
+
   /* ---------- documents ---------- */
 
   /*
@@ -818,6 +878,26 @@ const Settings = {
 
     for (const d of App.documents) addRow(d);
 
+    /*
+     * A looked-up article is one more unsaved row, like "+ add document": the
+     * Save button above is the one that keeps it. The control sits in a slot
+     * re-rendered when the wiki address changes, so saving an address in the
+     * block above makes it appear here without a reload. The listener removes
+     * itself once this block is no longer in the page, since Settings mounts
+     * fresh each time it is opened.
+     */
+    const lookupSlot = el('div', { class: 'col' });
+    const renderLookup = () => lookupSlot.replaceChildren(...[wikiLookup((doc) => {
+      addRow(doc);
+      return `Added "${doc.name}" below - press Save to keep it.`;
+    })].filter(Boolean));
+    const onWikiChanged = () => {
+      if (lookupSlot.isConnected) renderLookup();
+      else document.removeEventListener('wiki-changed', onWikiChanged);
+    };
+    renderLookup();
+    document.addEventListener('wiki-changed', onWikiChanged);
+
     return el('div', { class: 'settings-block' },
       el('div', { class: 'row' },
         el('label', {}, 'Documents (reference material to attach to conversations)'),
@@ -825,6 +905,7 @@ const Settings = {
         el('button', { onclick: () => addRow() }, '+ add document'),
         saveBtn,
       ),
+      lookupSlot,
       rowsWrap,
     );
   },

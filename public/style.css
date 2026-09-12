@@ -780,3 +780,21 @@ details.think .think-body {
 .rate-spark-wrap { color: var(--se-txt-dim); }
 .rate-spark { display: block; overflow: visible; }
 .rate-spark-wrap:has(.degraded) { color: var(--se-warn); }
+
+/* ===== Local wiki lookup =====
+   A typeahead of article titles under the search box, then a one-line
+   preview with a button per scope. Not rendered at all when no wiki is set. */
+.wiki-lookup { gap: 6px; }
+.wiki-suggest {
+  display: flex; flex-direction: column; gap: 1px;
+  max-height: 220px; overflow-y: auto;
+  border: 1px solid var(--se-border); border-radius: 6px; padding: 3px;
+  background: var(--se-panel);
+}
+.wiki-hit {
+  text-align: left; background: none; border: 0; padding: 4px 8px; cursor: pointer;
+  color: var(--se-txt); font: inherit; border-radius: 4px;
+}
+.wiki-hit:hover, .wiki-hit:focus { background: var(--se-active); }
+/* The class rules above set display, which would beat the UA's [hidden]. */
+.wiki-lookup [hidden] { display: none; }

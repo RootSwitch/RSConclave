@@ -67,6 +67,12 @@ export interface ModelProfile {
 
 export interface AppConfig {
   endpoints: Endpoint[];
+  /*
+   * A kiwix-serve, or a proxy in front of one, that the document library can
+   * look articles up in. Optional: absent, the lookup controls do not render.
+   * The server is the only thing that ever fetches from it.
+   */
+  wikiUrl?: string;
 }
 
 /*

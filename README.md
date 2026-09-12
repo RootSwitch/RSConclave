@@ -96,6 +96,7 @@ repo, so you can clone it and click through all four modes on a laptop.
 
 ```bash
 npm run mock     # fake Ollama on 127.0.0.1:11435, three models, streams at ~30 tok/s
+npm run mock-kiwix   # fake kiwix-serve on 127.0.0.1:8090, one book, four articles, for the wiki lookup
 ```
 
 Then in a second terminal:
@@ -497,6 +498,16 @@ box gets insert buttons for the library, which is the clean route from a documen
 memory. The library is deliberately dumb: verbatim text under a name, attach and detach, nothing
 else - memory is what you distil, documents are what you keep whole.
 
+**Looking an article up instead of pasting it.** Name a local wiki in Settings - a
+[kiwix-serve](https://github.com/kiwix/kiwix-tools) holding a Wikipedia snapshot, or a proxy in
+front of one - and the library and the Reference material fold gain a title search. Type, pick
+the article, and add its summary section or the whole thing, at a size shown before you choose.
+The document's first line names the encyclopedia, the article and the snapshot date, so a model
+can tell "not in this material" from "does not exist" - a title missing from a snapshot may simply
+be newer than the snapshot. Nothing is indexed and there are no embeddings: the archive carries
+its own title index and you choose the article, which is the cheapest grounding there is. The
+server does every fetch, from the one address you named; the browser never talks to the wiki.
+
 #### Presets, forks, and what the app refuses to remember
 
 Building a memory means the same persona, the same model and the same summariser over and over.
@@ -551,8 +562,10 @@ nothing after that - no access log, no prompt log, no error log to disk. Crashes
 console of whatever terminal you started it in and are not persisted.
 
 **What leaves your machine:** only the inference calls, only to the endpoints you configured
-in Settings. The server talks to `{baseUrl}/api/chat`, `/api/tags`, `/api/show`, `/api/ps`
-(or `/v1/*` for openai-compat) and nothing else. There is no telemetry, no analytics, no
+in Settings - and, if you named a local wiki there, title and article lookups to that one
+address. The server talks to `{baseUrl}/api/chat`, `/api/tags`, `/api/show`, `/api/ps`
+(or `/v1/*` for openai-compat), to the wiki's `/catalog/v2/entries`, `/suggest` and article
+paths, and nothing else. There is no telemetry, no analytics, no
 update check, no crash reporting. The frontend loads no fonts, scripts, or styles from any
 CDN - every asset is served from `public/`.
 
