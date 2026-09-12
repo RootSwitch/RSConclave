@@ -372,11 +372,18 @@ const fingerprint = () => new X509Certificate(pem!.cert).fingerprint256;
 const tlsTest = OPENSSL ? test : test.skip;
 if (!OPENSSL) console.log('# wiki TLS tests skipped: openssl not found');
 
+/*
+ * "Nothing was sent" is asserted on a path nothing else ever asks for, not
+ * on the log's length: a request from an earlier test arriving a beat late
+ * must not be able to fail the test that comes after it.
+ */
+const neverSent = (marker: string) => !seenTls.some((p) => p.includes(marker));
+
 tlsTest('https, untrusted: the failure names the certificate, not the box, and nothing was sent', async () => {
   const url = await readyTls;
-  await assert.rejects(listBooks({ url }, true),
+  await assert.rejects(fetchArticleHtml({ url }, 'foxglove_en_all_nopic_2026-01', 'Untrusted_probe'),
     (e: any) => e instanceof WikiCertError && e.kind === 'untrusted' && /does not trust/.test(e.message));
-  assert.equal(seenTls.length, 0);
+  assert.ok(neverSent('Untrusted_probe'));
 });
 
 tlsTest('probeCertificate: fingerprint, subject, names and self-signed, as the file says', async () => {
@@ -415,11 +422,10 @@ tlsTest('pinned: a redirect entry is followed over a fresh pinned connection', a
 
 tlsTest('pinned: a different certificate is refused before any request is sent', async () => {
   const url = await readyTls;
-  const before = seenTls.length;
   const pin = 'AA:' + fingerprint().slice(3);
-  await assert.rejects(listBooks({ url, pin }, true),
+  await assert.rejects(fetchArticleHtml({ url, pin }, 'foxglove_en_all_nopic_2026-01', 'Wrong_pin_probe'),
     (e: any) => e instanceof WikiCertError && e.kind === 'changed' && /different certificate/.test(e.message));
-  assert.equal(seenTls.length, before);
+  assert.ok(neverSent('Wrong_pin_probe'));
 });
 
 tlsTest('pinned: a 404 on /raw/ still falls back to /content/ over the pinned connection', async () => {
