@@ -54,7 +54,8 @@ const Api = {
   putDocuments: (list) => Api._put('/api/documents', list),
   // The local wiki: the server does every fetch, these only ask it to.
   getWiki: (fresh) => Api._json(`/api/wiki${fresh ? '?fresh=1' : ''}`),
-  putWiki: (url) => Api._put('/api/wiki', { url }),
+  // extra: { trust: '<sha-256 fingerprint>' } pins the wiki's certificate; { forget: true } drops the pin.
+  putWiki: (url, extra) => Api._put('/api/wiki', { url, ...(extra || {}) }),
   wikiSuggest: (book, q) => Api._json(`/api/wiki/suggest?book=${encodeURIComponent(book)}&q=${encodeURIComponent(q)}`),
   wikiArticle: (book, path) => Api._json(`/api/wiki/article?book=${encodeURIComponent(book)}&path=${encodeURIComponent(path)}`),
   getPresets: () => Api._json('/api/presets'),

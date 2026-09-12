@@ -6,9 +6,15 @@
 // /raw/<book>/content/<path> - in the shapes a real server uses, over a
 // fictional estate (RFC 2606 names, invented titles). Nothing here is text
 // from a real encyclopedia.
+import fs from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 
 const PORT = Number(process.env.MOCK_PORT ?? 8090);
+// MOCK_CERT and MOCK_KEY (PEM paths) make it serve https instead, to try the
+// certificate-trust flow. A self-signed pair from `openssl req -x509` will do.
+const CERT = process.env.MOCK_CERT;
+const KEY = process.env.MOCK_KEY;
 const BOOK = 'foxglove_en_all_nopic_2026-01';
 
 const CATALOG = `<?xml version="1.0" encoding="UTF-8"?>
@@ -92,7 +98,7 @@ best known for <a href="Foxglove_(video_game)">Foxglove</a>.</p></section>
   },
 };
 
-const server = http.createServer((req, res) => {
+const handler = (req: http.IncomingMessage, res: http.ServerResponse) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const pathname = decodeURIComponent(url.pathname);
   console.log(`${req.method} ${req.url}`);
@@ -128,8 +134,12 @@ const server = http.createServer((req, res) => {
   }
   res.writeHead(404, { 'content-type': 'text/html' });
   res.end('<html><body>Not found</body></html>');
-});
+};
 
+const server = CERT && KEY
+  ? https.createServer({ cert: fs.readFileSync(CERT), key: fs.readFileSync(KEY) }, handler)
+  : http.createServer(handler);
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`mock kiwix-serve on http://127.0.0.1:${PORT} - one book, ${Object.keys(ARTICLES).length} articles`);
+  const scheme = CERT && KEY ? 'https' : 'http';
+  console.log(`mock kiwix-serve on ${scheme}://127.0.0.1:${PORT} - one book, ${Object.keys(ARTICLES).length} articles`);
 });

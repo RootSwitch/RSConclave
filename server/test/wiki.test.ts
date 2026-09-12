@@ -1,8 +1,15 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { X509Certificate } from 'node:crypto';
+import fs from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
+import os from 'node:os';
+import path from 'node:path';
 import {
-  articleToText, composeDocument, documentName, fetchArticleHtml, htmlToText, listBooks, parseCatalog,
+  WikiCertError, articleToText, composeDocument, documentName, fetchArticleHtml, htmlToText, listBooks, parseCatalog,
+  probeCertificate,
   splitSections, suggestTitles,
 } from '../wiki.ts';
 
@@ -189,11 +196,11 @@ test('documentName: article then shelf, with the shelf trimmed at its parenthesi
 /* ---------- against a fake kiwix-serve ---------- */
 
 const seen: string[] = [];
-const fake = http.createServer((req, res) => {
+function handle(req: http.IncomingMessage, res: http.ServerResponse, log: string[]) {
   const url = new URL(req.url ?? '/', 'http://localhost');
   // URL.pathname keeps its percent-escapes; kiwix compares decoded paths.
   const pathname = decodeURIComponent(url.pathname);
-  seen.push(req.url ?? '');
+  log.push(req.url ?? '');
   if (pathname === '/catalog/v2/entries') {
     res.writeHead(200, { 'content-type': 'application/atom+xml' });
     res.end(CATALOG);
@@ -220,7 +227,8 @@ const fake = http.createServer((req, res) => {
     res.writeHead(404, { 'content-type': 'text/html' });
     res.end('<html>Not found</html>');
   }
-});
+}
+const fake = http.createServer((req, res) => handle(req, res, seen));
 
 const ready = new Promise<string>((resolve) => {
   fake.listen(0, '127.0.0.1', () => {
@@ -233,16 +241,16 @@ after(() => fake.close());
 test('listBooks: reads the catalog over HTTP and caches it', async () => {
   const base = await ready;
   const before = seen.length;
-  const books = await listBooks(base, true);
+  const books = await listBooks({ url: base }, true);
   assert.equal(books[0].id, 'foxglove_en_all_nopic_2026-01');
-  await listBooks(base);
+  await listBooks({ url: base });
   assert.equal(seen.length, before + 1, 'the second call came from the cache');
   assert.equal(seen[before], '/catalog/v2/entries', 'no doubled slash from the trailing one on the base');
 });
 
 test('suggestTitles: asks /suggest with content= and drops the full-text pattern entry', async () => {
   const base = await ready;
-  const hits = await suggestTitles(base, 'foxglove_en_all_nopic_2026-01', 'foxg');
+  const hits = await suggestTitles({ url: base }, 'foxglove_en_all_nopic_2026-01', 'foxg');
   assert.deepEqual(hits, [
     { title: 'Foxglove (video game)', path: 'Foxglove_(video_game)' },
     { title: 'Foxglove', path: 'Foxglove' },
@@ -253,19 +261,19 @@ test('suggestTitles: asks /suggest with content= and drops the full-text pattern
 
 test('suggestTitles: a wrong book id is an error with the status in it, not an empty list', async () => {
   const base = await ready;
-  await assert.rejects(suggestTitles(base, 'foxglove_en_all_nopic', 'fox'), /HTTP 400/);
+  await assert.rejects(suggestTitles({ url: base }, 'foxglove_en_all_nopic', 'fox'), /HTTP 400/);
 });
 
 test('fetchArticleHtml: /raw/ first, with the path encoded per segment', async () => {
   const base = await ready;
-  const html = await fetchArticleHtml(base, 'foxglove_en_all_nopic_2026-01', 'Foxglove_(video_game)');
+  const html = await fetchArticleHtml({ url: base }, 'foxglove_en_all_nopic_2026-01', 'Foxglove_(video_game)');
   assert.match(html, /Thistlewood Software/);
   assert.equal(seen[seen.length - 1], '/raw/foxglove_en_all_nopic_2026-01/content/Foxglove_(video_game)');
 });
 
 test('fetchArticleHtml: falls back to /content/ when /raw/ is missing, keeping slashes in the path', async () => {
   const base = await ready;
-  const html = await fetchArticleHtml(base, 'foxglove_en_all_nopic_2026-01', 'Old/Bramble (video game)');
+  const html = await fetchArticleHtml({ url: base }, 'foxglove_en_all_nopic_2026-01', 'Old/Bramble (video game)');
   assert.match(html, /unreleased 1996 platformer/);
   const tail = seen.slice(-2);
   assert.equal(tail[0], '/raw/foxglove_en_all_nopic_2026-01/content/Old/Bramble%20(video%20game)');
@@ -274,5 +282,102 @@ test('fetchArticleHtml: falls back to /content/ when /raw/ is missing, keeping s
 
 test('fetchArticleHtml: an article missing from both is a clear error', async () => {
   const base = await ready;
-  await assert.rejects(fetchArticleHtml(base, 'foxglove_en_all_nopic_2026-01', 'Nope'), /no article at "Nope"/);
+  await assert.rejects(fetchArticleHtml({ url: base }, 'foxglove_en_all_nopic_2026-01', 'Nope'), /no article at "Nope"/);
+});
+
+/* ---------- over TLS, with a certificate nothing trusts ---------- */
+
+/*
+ * A real handshake against a real self-signed certificate, made fresh by
+ * openssl at test time so no key ever lives in the repo. Without openssl the
+ * TLS tests are skipped, and say so, rather than passing vacuously.
+ */
+function opensslPath(): string | null {
+  for (const candidate of ['openssl', 'C:\\Program Files\\Git\\usr\\bin\\openssl.exe', '/usr/bin/openssl']) {
+    try {
+      execFileSync(candidate, ['version'], { stdio: 'ignore' });
+      return candidate;
+    } catch {
+      // try the next one
+    }
+  }
+  return null;
+}
+const OPENSSL = opensslPath();
+const certDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rsconclave-wiki-tls-'));
+let pem: { cert: Buffer; key: Buffer } | null = null;
+if (OPENSSL) {
+  execFileSync(OPENSSL, [
+    'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes',
+    '-keyout', path.join(certDir, 'k.pem'), '-out', path.join(certDir, 'c.pem'), '-days', '2',
+    '-subj', '/CN=wiki.example', '-addext', 'subjectAltName=DNS:wiki.example,IP:127.0.0.1',
+  ], { stdio: 'ignore' });
+  pem = { cert: fs.readFileSync(path.join(certDir, 'c.pem')), key: fs.readFileSync(path.join(certDir, 'k.pem')) };
+}
+const seenTls: string[] = [];
+const fakeTls = pem ? https.createServer(pem, (req, res) => handle(req, res, seenTls)) : null;
+const readyTls = new Promise<string>((resolve) => {
+  if (!fakeTls) return resolve('');
+  fakeTls.listen(0, '127.0.0.1', () => resolve(`https://127.0.0.1:${(fakeTls.address() as { port: number }).port}`));
+});
+after(() => {
+  fakeTls?.close();
+  fs.rmSync(certDir, { recursive: true, force: true });
+});
+const fingerprint = () => new X509Certificate(pem!.cert).fingerprint256;
+const tlsTest = OPENSSL ? test : test.skip;
+if (!OPENSSL) console.log('# wiki TLS tests skipped: openssl not found');
+
+tlsTest('https, untrusted: the failure names the certificate, not the box, and nothing was sent', async () => {
+  const url = await readyTls;
+  await assert.rejects(listBooks({ url }, true),
+    (e: any) => e instanceof WikiCertError && e.kind === 'untrusted' && /does not trust/.test(e.message));
+  assert.equal(seenTls.length, 0);
+});
+
+tlsTest('probeCertificate: fingerprint, subject, names and self-signed, as the file says', async () => {
+  const url = await readyTls;
+  const c = await probeCertificate(url);
+  assert.equal(c.fingerprint256, fingerprint());
+  assert.equal(c.subject, 'wiki.example');
+  assert.match(c.altNames, /IP Address:127\.0\.0\.1/);
+  assert.equal(c.selfSigned, true);
+  assert.equal(seenTls.length, 0, 'a probe makes no request');
+});
+
+tlsTest('pinned: the trusted fingerprint lets the catalog, suggest and article calls through', async () => {
+  const url = await readyTls;
+  const pin = fingerprint();
+  const books = await listBooks({ url, pin }, true);
+  assert.equal(books[0].id, 'foxglove_en_all_nopic_2026-01');
+  const hits = await suggestTitles({ url, pin }, 'foxglove_en_all_nopic_2026-01', 'foxg');
+  assert.equal(hits[0].title, 'Foxglove (video game)');
+  const html = await fetchArticleHtml({ url, pin }, 'foxglove_en_all_nopic_2026-01', 'Foxglove_(video_game)');
+  assert.match(html, /Thistlewood Software/);
+  assert.deepEqual(seenTls.slice(-3), [
+    '/catalog/v2/entries',
+    '/suggest?content=foxglove_en_all_nopic_2026-01&term=foxg&count=12',
+    '/raw/foxglove_en_all_nopic_2026-01/content/Foxglove_(video_game)',
+  ]);
+});
+
+tlsTest('pinned: a different certificate is refused before any request is sent', async () => {
+  const url = await readyTls;
+  const before = seenTls.length;
+  const pin = 'AA:' + fingerprint().slice(3);
+  await assert.rejects(listBooks({ url, pin }, true),
+    (e: any) => e instanceof WikiCertError && e.kind === 'changed' && /different certificate/.test(e.message));
+  assert.equal(seenTls.length, before);
+});
+
+tlsTest('pinned: a 404 on /raw/ still falls back to /content/ over the pinned connection', async () => {
+  const url = await readyTls;
+  const html = await fetchArticleHtml({ url, pin: fingerprint() }, 'foxglove_en_all_nopic_2026-01', 'Old/Bramble (video game)');
+  assert.match(html, /unreleased 1996 platformer/);
+});
+
+test('a pin on a plain http address changes nothing', async () => {
+  const base = await ready;
+  const books = await listBooks({ url: base, pin: 'AA:BB' }, true);
+  assert.equal(books.length, 3);
 });

@@ -19,7 +19,48 @@
  * `books.name=`; a suggestion's plain title is in `value` and its `label`
  * carries <b> tags.
  */
+import https from 'node:https';
+import net from 'node:net';
+import tls from 'node:tls';
 import { estimate } from './tokens.ts';
+
+/**
+ * Where the wiki is, and - for an https address whose certificate this
+ * machine does not trust - the SHA-256 fingerprint of the one certificate
+ * to accept there. A self-signed certificate on a LAN box is the normal case,
+ * not an edge: the trust is pinned to that exact certificate, applies to the
+ * wiki lookups and nothing else in the process, and a different certificate
+ * showing up later is refused rather than quietly accepted.
+ */
+export interface WikiTarget {
+  url: string;
+  pin?: string;
+}
+
+/** What the wiki's certificate says, for the person deciding whether to trust it. */
+export interface WikiCert {
+  fingerprint256: string;
+  subject: string;
+  altNames: string;
+  issuer: string;
+  validFrom: string;
+  validTo: string;
+  selfSigned: boolean;
+}
+
+/**
+ * A certificate problem, told apart from "the box is off" because it has a
+ * different remedy: Settings can show the certificate and offer to trust it.
+ * `untrusted` is the first meeting; `changed` is a pinned address presenting
+ * something other than what was pinned.
+ */
+export class WikiCertError extends Error {
+  kind: 'untrusted' | 'changed';
+  constructor(kind: 'untrusted' | 'changed', message: string) {
+    super(message);
+    this.kind = kind;
+  }
+}
 
 export interface WikiBook {
   /** The content path segment: /content/<id>/..., /suggest?content=<id>. */
@@ -56,13 +97,182 @@ function base(url: string): string {
   return url.replace(/\/+$/, '');
 }
 
-async function reach(url: string, accept: string, wikiUrl: string): Promise<Response> {
+/** The slice of a response the callers use, so fetch and the pinned path can both provide it. */
+interface Reply {
+  status: number;
+  ok: boolean;
+  header(name: string): string | null;
+  text(): Promise<string>;
+  json(): Promise<unknown>;
+  discard(): Promise<void>;
+}
+
+/** The verification failures that mean "this certificate", as opposed to "no server". */
+const CERT_CODES = new Set([
+  'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_GET_ISSUER_CERT', 'CERT_HAS_EXPIRED', 'CERT_NOT_YET_VALID',
+  'CERT_UNTRUSTED', 'CERT_SIGNATURE_FAILURE', 'ERR_TLS_CERT_ALTNAME_INVALID',
+]);
+
+function unreachable(target: WikiTarget, why: string): Error {
+  return new Error(`Cannot reach the local wiki (${target.url}): ${why} - is it running?`);
+}
+
+async function reach(url: string, accept: string, target: WikiTarget): Promise<Reply> {
+  if (target.pin && url.startsWith('https:')) return pinnedGet(url, accept, target);
   try {
-    return await fetch(url, { headers: { accept }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await fetch(url, { headers: { accept }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    return {
+      status: res.status,
+      ok: res.ok,
+      header: (name) => res.headers.get(name),
+      text: () => res.text(),
+      json: () => res.json(),
+      discard: () => res.body?.cancel().catch(() => {}) ?? Promise.resolve(),
+    };
   } catch (err: any) {
-    const why = err?.name === 'TimeoutError' ? 'timed out' : (err?.message ?? String(err));
-    throw new Error(`Cannot reach the local wiki (${wikiUrl}): ${why} - is it running?`);
+    // fetch wraps the TLS failure: the code that says which is on the cause.
+    const code = String(err?.cause?.code ?? err?.code ?? '');
+    if (CERT_CODES.has(code)) {
+      throw new WikiCertError('untrusted',
+        `${target.url} presents a certificate this machine does not trust (${code}). ` +
+        'Save and test in Settings shows the certificate and can trust it.');
+    }
+    throw unreachable(target, err?.name === 'TimeoutError' ? 'timed out' : (err?.message ?? String(err)));
   }
+}
+
+/* ---------- the pinned path ---------- */
+
+function tlsOptions(u: URL): tls.ConnectionOptions {
+  const host = u.hostname.replace(/^\[|\]$/g, '');
+  return {
+    host,
+    port: Number(u.port || 443),
+    // SNI carries a name, never an address; Node refuses an IP there.
+    servername: net.isIP(host) ? undefined : host,
+    rejectUnauthorized: false,
+  };
+}
+
+/**
+ * A TLS connection to the wiki whose certificate has been checked against the
+ * pin BEFORE the request exists, so a wrong certificate never sees a byte of
+ * it - not the title being searched for, not the article path. The check is
+ * done here by hand rather than through checkServerIdentity, which Node only
+ * consults after the chain verified, and a self-signed chain never does.
+ */
+function connectPinned(u: URL, target: WikiTarget): Promise<tls.TLSSocket> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const socket = tls.connect(tlsOptions(u));
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(err);
+    };
+    socket.setTimeout(TIMEOUT_MS, () => fail(unreachable(target, 'timed out')));
+    socket.on('error', (err) => fail(unreachable(target, err.message)));
+    socket.once('secureConnect', () => {
+      const seen = socket.getPeerCertificate()?.fingerprint256 ?? '';
+      if (seen !== target.pin) {
+        return fail(new WikiCertError('changed',
+          `${target.url} now presents a different certificate (SHA-256 ${seen || 'unknown'}) from the one ` +
+          'trusted in Settings. If the wiki\'s certificate was renewed, trust it again there.'));
+      }
+      settled = true;
+      socket.setTimeout(0);
+      resolve(socket);
+    });
+  });
+}
+
+async function pinnedGet(url: string, accept: string, target: WikiTarget): Promise<Reply> {
+  const u = new URL(url);
+  const socket = await connectPinned(u, target);
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      method: 'GET',
+      host: u.hostname,
+      port: u.port || 443,
+      path: u.pathname + u.search,
+      headers: { accept, connection: 'close' },
+      // Hands over the already-verified socket; with this set and no agent
+      // given, Node uses it instead of opening its own.
+      createConnection: () => socket,
+      timeout: TIMEOUT_MS,
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      let over = false;
+      res.on('data', (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > MAX_HTML) {
+          over = true;
+          res.destroy();
+        } else chunks.push(chunk);
+      });
+      const body = new Promise<Buffer>((done, fail) => {
+        res.on('end', () => done(Buffer.concat(chunks)));
+        res.on('error', fail);
+        res.on('close', () => (over ? fail(new Error('larger than this will read')) : done(Buffer.concat(chunks))));
+      });
+      body.catch(() => {}); // observed again by text()/json(); this stops the unhandled-rejection warning
+      resolve({
+        status: res.statusCode ?? 0,
+        ok: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300,
+        header: (name) => {
+          const v = res.headers[name.toLowerCase()];
+          return Array.isArray(v) ? v.join(', ') : (v ?? null);
+        },
+        text: () => body.then((b) => b.toString('utf8')),
+        json: () => body.then((b) => JSON.parse(b.toString('utf8'))),
+        discard: () => Promise.resolve(res.destroy()).then(() => {}),
+      });
+    });
+    req.on('timeout', () => req.destroy(unreachable(target, 'timed out')));
+    req.on('error', (err) => reject(err.message.startsWith('Cannot reach') ? err : unreachable(target, err.message)));
+    req.end();
+  });
+}
+
+/**
+ * What certificate an https wiki presents, verified or not, so Settings can
+ * show it to the person deciding. Connects, reads, hangs up: no request is
+ * made on this connection.
+ */
+export function probeCertificate(wikiUrl: string): Promise<WikiCert> {
+  const u = new URL(base(wikiUrl));
+  const target = { url: wikiUrl };
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const socket = tls.connect(tlsOptions(u));
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(err);
+    };
+    socket.setTimeout(TIMEOUT_MS, () => fail(unreachable(target, 'timed out')));
+    socket.on('error', (err) => fail(unreachable(target, err.message)));
+    socket.once('secureConnect', () => {
+      const c = socket.getPeerCertificate(true);
+      settled = true;
+      socket.end();
+      if (!c || !c.fingerprint256) return reject(new Error(`${wikiUrl} presented no certificate`));
+      resolve({
+        fingerprint256: c.fingerprint256,
+        subject: c.subject?.CN ?? '',
+        altNames: c.subjectaltname ?? '',
+        issuer: c.issuer?.CN ?? '',
+        validFrom: c.valid_from,
+        validTo: c.valid_to,
+        // Node hands a self-signed certificate back as its own issuer.
+        selfSigned: !!c.issuerCertificate && c.issuerCertificate.fingerprint256 === c.fingerprint256,
+      });
+    });
+  });
 }
 
 /* ---------- catalog ---------- */
@@ -127,26 +337,27 @@ export function parseCatalog(xml: string): WikiBook[] {
   return books;
 }
 
-let catalogCache: { url: string; at: number; books: WikiBook[] } | null = null;
+let catalogCache: { key: string; at: number; books: WikiBook[] } | null = null;
 
 /** The books the wiki serves, cached for a minute so a typeahead does not hammer the catalog. */
-export async function listBooks(wikiUrl: string, fresh = false): Promise<WikiBook[]> {
-  const url = base(wikiUrl);
-  if (!fresh && catalogCache && catalogCache.url === url && Date.now() - catalogCache.at < CATALOG_TTL_MS) {
+export async function listBooks(target: WikiTarget, fresh = false): Promise<WikiBook[]> {
+  const url = base(target.url);
+  const key = `${url} ${target.pin ?? ''}`;
+  if (!fresh && catalogCache && catalogCache.key === key && Date.now() - catalogCache.at < CATALOG_TTL_MS) {
     return catalogCache.books;
   }
-  const res = await reach(`${url}/catalog/v2/entries`, 'application/atom+xml', wikiUrl);
-  if (!res.ok) throw new Error(`the wiki's catalog answered HTTP ${res.status} - is ${wikiUrl} a kiwix-serve or RSCodex address?`);
+  const res = await reach(`${url}/catalog/v2/entries`, 'application/atom+xml', target);
+  if (!res.ok) throw new Error(`the wiki's catalog answered HTTP ${res.status} - is ${target.url} a kiwix-serve address?`);
   const books = parseCatalog(await res.text());
-  catalogCache = { url, at: Date.now(), books };
+  catalogCache = { key, at: Date.now(), books };
   return books;
 }
 
 /* ---------- suggest ---------- */
 
-export async function suggestTitles(wikiUrl: string, bookId: string, term: string, count = 12): Promise<WikiSuggestion[]> {
+export async function suggestTitles(target: WikiTarget, bookId: string, term: string, count = 12): Promise<WikiSuggestion[]> {
   const q = new URLSearchParams({ content: bookId, term, count: String(count) });
-  const res = await reach(`${base(wikiUrl)}/suggest?${q}`, 'application/json', wikiUrl);
+  const res = await reach(`${base(target.url)}/suggest?${q}`, 'application/json', target);
   if (!res.ok) throw new Error(`the wiki answered HTTP ${res.status} to a title search`);
   const data: unknown = await res.json().catch(() => null);
   if (!Array.isArray(data)) return [];
@@ -176,18 +387,18 @@ function encodePath(p: string): string {
  * a server old enough to lack it answers 404, and /content/ then serves the
  * same HTML with at most a head tag or two added, which the converter drops.
  */
-export async function fetchArticleHtml(wikiUrl: string, bookId: string, path: string): Promise<string> {
-  const b = base(wikiUrl);
+export async function fetchArticleHtml(target: WikiTarget, bookId: string, path: string): Promise<string> {
+  const b = base(target.url);
   const book = encodeURIComponent(bookId);
   const p = encodePath(path);
   for (const url of [`${b}/raw/${book}/content/${p}`, `${b}/content/${book}/${p}`]) {
-    const res = await reach(url, 'text/html', wikiUrl);
+    const res = await reach(url, 'text/html', target);
     if (res.status === 404) {
-      await res.body?.cancel().catch(() => {});
+      await res.discard();
       continue;
     }
     if (!res.ok) throw new Error(`the wiki answered HTTP ${res.status} for "${path}"`);
-    const declared = Number(res.headers.get('content-length') ?? 0);
+    const declared = Number(res.header('content-length') ?? 0);
     if (declared > MAX_HTML) throw new Error(`"${path}" is ${Math.round(declared / 1e6)} MB of HTML, more than this will read`);
     const html = await res.text();
     if (html.length > MAX_HTML) throw new Error(`"${path}" is larger than this will read`);

@@ -507,6 +507,11 @@ can tell "not in this material" from "does not exist" - a title missing from a s
 be newer than the snapshot. Nothing is indexed and there are no embeddings: the archive carries
 its own title index and you choose the article, which is the cheapest grounding there is. The
 server does every fetch, from the one address you named; the browser never talks to the wiki.
+An https address with a certificate this machine does not trust - a self-signed one, say - is
+not a dead end: Save and test shows the certificate's SHA-256 fingerprint and offers to trust
+it, and that trust is pinned to that exact certificate, applies to the wiki lookups and nothing
+else in the app, and is refused if a different certificate turns up later. Compare the
+fingerprint with the one on the wiki box before pressing the button.
 
 #### Presets, forks, and what the app refuses to remember
 

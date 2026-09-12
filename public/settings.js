@@ -745,33 +745,61 @@ const Settings = {
       value: App.config.wikiUrl ?? '',
       style: 'flex: 1',
     });
-    const msg = el('span', { class: 'muted' });
+    const status = el('div', { class: 'col', style: 'gap: 4px' });
+    const line = (text, cls) => el('span', { class: cls || 'muted' }, text);
+    /*
+     * The status is rebuilt from the server's answer each time. A certificate
+     * this machine does not trust arrives with the answer, and is shown in
+     * full - who it claims to be, who signed it, its dates, its fingerprint -
+     * because the decision to trust it is the person's, made by comparing the
+     * fingerprint with the one on the wiki box. Nothing here trusts anything
+     * on its own.
+     */
     const show = (w) => {
-      msg.className = w.error ? 'error-text' : 'muted';
-      if (w.error) msg.textContent = w.error;
-      else if (!w.url) msg.textContent = 'Not set. The lookup controls stay hidden until it is.';
-      else if (!w.books.length) msg.textContent = 'Reachable, but its catalog lists no books.';
+      const parts = [];
+      if (w.error) parts.push(line(w.error, 'error-text'));
+      else if (!w.url) parts.push(line('Not set. The lookup controls stay hidden until it is.'));
+      else if (!w.books.length) parts.push(line('Reachable, but its catalog lists no books.'));
       else {
-        msg.textContent = w.books.map((b) =>
+        parts.push(line(w.books.map((b) =>
           `${b.title}: snapshot ${b.snapshot ?? 'date unknown'}${b.articleCount ? `, ${b.articleCount.toLocaleString()} articles` : ''}`,
-        ).join(' / ');
+        ).join(' / ')));
       }
+      if (w.certificate) {
+        const c = w.certificate;
+        const who = c.subject ? `CN=${c.subject}` : '(no subject)';
+        const names = c.altNames ? `, ${c.altNames}` : '';
+        const by = c.selfSigned ? 'self-signed' : `issued by ${c.issuer || 'an unknown authority'}`;
+        parts.push(line(`Its certificate: ${who}${names}; ${by}; valid ${c.validFrom} to ${c.validTo}.`));
+        parts.push(el('span', { class: 'prompt-size', style: 'user-select: all' }, `SHA-256 ${c.fingerprint256}`));
+        parts.push(el('div', { class: 'row' },
+          el('button', { class: 'mini', onclick: () => trust(c.fingerprint256) },
+            w.certError === 'changed' ? 'Trust this certificate instead' : 'Trust this certificate'),
+          line('Compare the fingerprint with the one on the wiki box first. Trusting it applies to the wiki lookups and nothing else.'),
+        ));
+      } else if (w.trusted) {
+        parts.push(el('div', { class: 'row' },
+          line(`Trusting its certificate, SHA-256 ${w.trusted.fingerprint256.slice(0, 23)}..., since ${w.trusted.trustedAt.slice(0, 10)}.`),
+          el('button', { class: 'mini', onclick: () => forget() }, 'Forget'),
+        ));
+      }
+      status.replaceChildren(...parts);
     };
+    const apply = async (extra) => {
+      const value = url.value.trim().replace(/\/+$/, '');
+      await Api.putWiki(value, extra);
+      App.config.wikiUrl = value || undefined;
+      url.value = value;
+      // The Documents block further down renders its lookup from this
+      // value; tell it, so the control appears without a page reload.
+      document.dispatchEvent(new CustomEvent('wiki-changed'));
+      status.replaceChildren(line(value ? 'Reading its catalog...' : ''));
+      show(await Api.getWiki(true));
+    };
+    const trust = (fingerprint) => apply({ trust: fingerprint }).catch((e) => show({ error: e.message }));
+    const forget = () => apply({ forget: true }).catch((e) => show({ error: e.message }));
     const saveBtn = el('button', { class: 'primary' }, 'Save and test');
-    saveBtn.onclick = async () => {
-      try {
-        const value = url.value.trim().replace(/\/+$/, '');
-        await Api.putWiki(value);
-        App.config.wikiUrl = value || undefined;
-        url.value = value;
-        msg.className = 'muted';
-        msg.textContent = value ? 'Reading its catalog...' : '';
-        // The Documents block further down renders its lookup from this
-        // value; tell it, so the control appears without a page reload.
-        document.dispatchEvent(new CustomEvent('wiki-changed'));
-        show(await Api.getWiki(true));
-      } catch (e) { show({ error: e.message }); }
-    };
+    saveBtn.onclick = () => apply().catch((e) => show({ error: e.message }));
     onEnterSubmit([url], () => saveBtn.click());
     if (App.config.wikiUrl) Api.getWiki().then(show).catch((e) => show({ error: e.message }));
     else show({ url: '', books: [] });
@@ -785,8 +813,9 @@ const Settings = {
       el('span', { class: 'muted' },
         'A kiwix-serve, or a proxy in front of one, on your network. The document library and the ' +
         'Reference material fold can then look articles up by title. The server fetches from this ' +
-        'address; the browser never does.'),
-      msg,
+        'address; the browser never does. An https address with a self-signed certificate works: ' +
+        'Save and test shows the certificate and offers to trust it.'),
+      status,
     );
   },
 
