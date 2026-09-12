@@ -159,6 +159,20 @@ test('articleToText: Vector 2022 article - mw-heading wrappers and bare mw-ref s
   assert.equal(a.sections, 1);
 });
 
+test('articleToText: an h1 inside the body container is the title, not a section', () => {
+  // As the 2024 nopic snapshot really has it: the heading-holder sits inside
+  // #bodyContent.mw-parser-output, before the lead paragraph.
+  const inside = MINERVA
+    .replace('<div class="pre-content heading-holder"><h1 id="section_0" class="firstHeading">Foxglove (video game)</h1></div>\n', '')
+    .replace('<section class="mf-section-0" id="mf-section-0">',
+      '<div class="pre-content heading-holder"><h1 id="section_0" class="firstHeading">Foxglove (video game)</h1></div><section class="mf-section-0" id="mf-section-0">');
+  const a = articleToText(inside);
+  assert.equal(a.title, 'Foxglove (video game)');
+  assert.match(a.lead, /^Foxglove\nDeveloper/, 'the lead starts with the infobox, not with a heading');
+  assert.doesNotMatch(a.full, /## Foxglove \(video game\)/);
+  assert.equal(a.sections, 2);
+});
+
 test('articleToText: no .mw-parser-output at all still yields the body text', () => {
   const a = articleToText('<html><head><title>Plain</title></head><body><p>Just a <i>page</i>.</p><h2>More</h2><p>Text.</p></body></html>');
   assert.equal(a.title, 'Plain');
@@ -223,6 +237,20 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, log: string
     // An older server without /raw/: the first try 404s, this one answers.
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(VECTOR);
+  } else if (pathname === '/raw/foxglove_en_all_nopic_2026-01/content/A/Foxglove_(FPS)') {
+    // A redirect entry, answered the way a real kiwix does: 302 from /raw/ to
+    // the target's /content/ path, root-relative.
+    res.writeHead(302, { location: '/content/foxglove_en_all_nopic_2026-01/A/Foxglove_(video_game)' });
+    res.end();
+  } else if (pathname === '/content/foxglove_en_all_nopic_2026-01/A/Foxglove_(video_game)') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(MINERVA);
+  } else if (pathname === '/raw/foxglove_en_all_nopic_2026-01/content/A/Elsewhere') {
+    res.writeHead(302, { location: 'https://example.com/not-the-wiki' });
+    res.end();
+  } else if (pathname === '/raw/foxglove_en_all_nopic_2026-01/content/A/Loop') {
+    res.writeHead(302, { location: '/raw/foxglove_en_all_nopic_2026-01/content/A/Loop' });
+    res.end();
   } else {
     res.writeHead(404, { 'content-type': 'text/html' });
     res.end('<html>Not found</html>');
@@ -256,7 +284,23 @@ test('suggestTitles: asks /suggest with content= and drops the full-text pattern
     { title: 'Foxglove', path: 'Foxglove' },
   ]);
   const last = seen[seen.length - 1];
-  assert.match(last, /^\/suggest\?content=foxglove_en_all_nopic_2026-01&term=foxg&count=12$/);
+  assert.match(last, /^\/suggest\?content=foxglove_en_all_nopic_2026-01&term=foxg&count=20$/);
+});
+
+test('fetchArticleHtml: a redirect entry is followed to the article it points at', async () => {
+  const base = await ready;
+  const html = await fetchArticleHtml({ url: base }, 'foxglove_en_all_nopic_2026-01', 'A/Foxglove_(FPS)');
+  assert.match(html, /Thistlewood Software/);
+  assert.deepEqual(seen.slice(-2), [
+    '/raw/foxglove_en_all_nopic_2026-01/content/A/Foxglove_(FPS)',
+    '/content/foxglove_en_all_nopic_2026-01/A/Foxglove_(video_game)',
+  ]);
+});
+
+test('fetchArticleHtml: a redirect off the wiki is refused, and a loop gives up', async () => {
+  const base = await ready;
+  await assert.rejects(fetchArticleHtml({ url: base }, 'foxglove_en_all_nopic_2026-01', 'A/Elsewhere'), /redirected off itself, to https:\/\/example\.com/);
+  await assert.rejects(fetchArticleHtml({ url: base }, 'foxglove_en_all_nopic_2026-01', 'A/Loop'), /redirected 5 times/);
 });
 
 test('suggestTitles: a wrong book id is an error with the status in it, not an empty list', async () => {
@@ -356,9 +400,17 @@ tlsTest('pinned: the trusted fingerprint lets the catalog, suggest and article c
   assert.match(html, /Thistlewood Software/);
   assert.deepEqual(seenTls.slice(-3), [
     '/catalog/v2/entries',
-    '/suggest?content=foxglove_en_all_nopic_2026-01&term=foxg&count=12',
+    '/suggest?content=foxglove_en_all_nopic_2026-01&term=foxg&count=20',
     '/raw/foxglove_en_all_nopic_2026-01/content/Foxglove_(video_game)',
   ]);
+});
+
+tlsTest('pinned: a redirect entry is followed over a fresh pinned connection', async () => {
+  const url = await readyTls;
+  const before = seenTls.length;
+  const html = await fetchArticleHtml({ url, pin: fingerprint() }, 'foxglove_en_all_nopic_2026-01', 'A/Foxglove_(FPS)');
+  assert.match(html, /Thistlewood Software/);
+  assert.equal(seenTls.length, before + 2);
 });
 
 tlsTest('pinned: a different certificate is refused before any request is sent', async () => {

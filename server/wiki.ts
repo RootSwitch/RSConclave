@@ -118,10 +118,42 @@ function unreachable(target: WikiTarget, why: string): Error {
   return new Error(`Cannot reach the local wiki (${target.url}): ${why} - is it running?`);
 }
 
+const MAX_HOPS = 5;
+
+/**
+ * One GET, redirects followed. Wikipedia is full of redirect entries -
+ * "Minneapolis (Minn.)" is an entry whose whole content is "see Minneapolis" -
+ * and kiwix answers one with a 302 to the target, from /raw/ and /content/
+ * alike. Followed here, for the pinned path and the plain one, so the two
+ * cannot differ; and only within the wiki's own origin, because a Location
+ * that points elsewhere is not a wiki article.
+ */
 async function reach(url: string, accept: string, target: WikiTarget): Promise<Reply> {
+  const origin = new URL(base(target.url)).origin;
+  let current = url;
+  for (let hop = 0; ; hop++) {
+    const res = await reachOnce(current, accept, target);
+    const location = res.header('location');
+    if (!(res.status >= 300 && res.status < 400 && location)) return res;
+    await res.discard();
+    let next: URL;
+    try {
+      next = new URL(location, current);
+    } catch {
+      throw new Error(`the wiki redirected to something that is not a URL (${location})`);
+    }
+    if (next.origin !== origin) throw new Error(`the wiki redirected off itself, to ${next.origin} - refused`);
+    if (hop + 1 >= MAX_HOPS) throw new Error(`the wiki redirected ${MAX_HOPS} times in a row - giving up`);
+    current = next.toString();
+  }
+}
+
+async function reachOnce(url: string, accept: string, target: WikiTarget): Promise<Reply> {
   if (target.pin && url.startsWith('https:')) return pinnedGet(url, accept, target);
   try {
-    const res = await fetch(url, { headers: { accept }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    // 'manual' hands redirects back rather than following them, so both paths
+    // go through the same origin check above.
+    const res = await fetch(url, { headers: { accept }, redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT_MS) });
     return {
       status: res.status,
       ok: res.ok,
@@ -355,7 +387,12 @@ export async function listBooks(target: WikiTarget, fresh = false): Promise<Wiki
 
 /* ---------- suggest ---------- */
 
-export async function suggestTitles(target: WikiTarget, bookId: string, term: string, count = 12): Promise<WikiSuggestion[]> {
+/*
+ * Twenty rather than ten: kiwix orders suggestions by its own idea of a match,
+ * and against a real snapshot "Minnesota" came sixth for the term "Minnesota",
+ * behind "1st Minnesota" and "Minnesota 13". The list scrolls.
+ */
+export async function suggestTitles(target: WikiTarget, bookId: string, term: string, count = 20): Promise<WikiSuggestion[]> {
   const q = new URLSearchParams({ content: bookId, term, count: String(count) });
   const res = await reach(`${base(target.url)}/suggest?${q}`, 'application/json', target);
   if (!res.ok) throw new Error(`the wiki answered HTTP ${res.status} to a title search`);
@@ -410,8 +447,13 @@ export async function fetchArticleHtml(target: WikiTarget, bookId: string, path:
 /* ---------- HTML to text ---------- */
 
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
-/** Whole elements that are never article text. */
-const DROP_TAGS = new Set(['nav', 'header', 'footer', 'template', 'svg', 'iframe', 'object', 'audio', 'video', 'button', 'form']);
+/**
+ * Whole elements that are never article text. h1 is the article's title,
+ * read separately by titleOf(); the 2024 Minerva snapshot puts it INSIDE the
+ * body container, where left in it became a section heading and swallowed
+ * the lead. The title has its own line at the top of the document.
+ */
+const DROP_TAGS = new Set(['h1', 'nav', 'header', 'footer', 'template', 'svg', 'iframe', 'object', 'audio', 'video', 'button', 'form']);
 /**
  * Wikipedia's furniture, by class: navigation boxes, hatnotes, maintenance
  * banners, citation superscripts, the reference lists themselves, category
@@ -613,6 +655,11 @@ function tidy(text: string): string {
       .replace(/(\s*\|)+\s*$/, '')    // the separator after the last cell
       .replace(/\|(\s*\|)+/g, '|')    // empty cells in the middle
       .replace(/^- $/, '')            // an item whose content was all dropped
+      // "Minnesota ( MIN-ə-SOH-tə)": a pronunciation widget dropped from
+      // inside the parentheses leaves its spacing behind.
+      .replace(/\(\s+/g, '(')
+      .replace(/\s+\)/g, ')')
+      .replace(/\(\)/g, '')
       .trim());
   return lines.join('\n')
     .replace(/\n{3,}/g, '\n\n')
