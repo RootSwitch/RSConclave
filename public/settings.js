@@ -11,7 +11,7 @@ const Settings = {
     scroll.append(el('h3', { class: 'view-title' }, 'Settings'));
     // Personas last: it is the one block that grows without bound, so
     // everything fixed-size stays reachable without scrolling past it.
-    scroll.append(this.buildAccount(), this.buildUsers(), this.buildEndpoints(), this.buildWiki(), this.buildPersonas(), this.buildDocuments());
+    scroll.append(this.buildAccount(), this.buildUsers(), this.buildEndpoints(), this.buildPersonas(), this.buildDocuments());
     this.root.append(scroll);
   },
 
@@ -730,95 +730,6 @@ const Settings = {
     );
   },
 
-  /* ---------- local wiki ---------- */
-
-  /*
-   * One address for a kiwix-serve, or a proxy in front of one. Shared like
-   * the endpoints are - the server is what fetches from it, so it is the
-   * server's list of places to reach that grows, by exactly this one. Saved
-   * and tested in the same press, because the test runs from the server
-   * against the saved address: there is nothing to test until it is saved.
-   */
-  buildWiki() {
-    const url = el('input', {
-      placeholder: 'http://wiki-box:8080 (kiwix-serve, or a proxy in front of one)',
-      value: App.config.wikiUrl ?? '',
-      style: 'flex: 1',
-    });
-    const status = el('div', { class: 'col', style: 'gap: 4px' });
-    const line = (text, cls) => el('span', { class: cls || 'muted' }, text);
-    /*
-     * The status is rebuilt from the server's answer each time. A certificate
-     * this machine does not trust arrives with the answer, and is shown in
-     * full - who it claims to be, who signed it, its dates, its fingerprint -
-     * because the decision to trust it is the person's, made by comparing the
-     * fingerprint with the one on the wiki box. Nothing here trusts anything
-     * on its own.
-     */
-    const show = (w) => {
-      const parts = [];
-      if (w.error) parts.push(line(w.error, 'error-text'));
-      else if (!w.url) parts.push(line('Not set. The lookup controls stay hidden until it is.'));
-      else if (!w.books.length) parts.push(line('Reachable, but its catalog lists no books.'));
-      else {
-        parts.push(line(w.books.map((b) =>
-          `${b.title}: snapshot ${b.snapshot ?? 'date unknown'}${b.articleCount ? `, ${b.articleCount.toLocaleString()} articles` : ''}`,
-        ).join(' / ')));
-      }
-      if (w.certificate) {
-        const c = w.certificate;
-        const who = c.subject ? `CN=${c.subject}` : '(no subject)';
-        const names = c.altNames ? `, ${c.altNames}` : '';
-        const by = c.selfSigned ? 'self-signed' : `issued by ${c.issuer || 'an unknown authority'}`;
-        parts.push(line(`Its certificate: ${who}${names}; ${by}; valid ${c.validFrom} to ${c.validTo}.`));
-        parts.push(el('span', { class: 'prompt-size', style: 'user-select: all' }, `SHA-256 ${c.fingerprint256}`));
-        parts.push(el('div', { class: 'row' },
-          el('button', { class: 'mini', onclick: () => trust(c.fingerprint256) },
-            w.certError === 'changed' ? 'Trust this certificate instead' : 'Trust this certificate'),
-          line('Compare the fingerprint with the one on the wiki box first. Trusting it applies to the wiki lookups and nothing else.'),
-        ));
-      } else if (w.trusted) {
-        parts.push(el('div', { class: 'row' },
-          line(`Trusting its certificate, SHA-256 ${w.trusted.fingerprint256.slice(0, 23)}..., since ${w.trusted.trustedAt.slice(0, 10)}.`),
-          el('button', { class: 'mini', onclick: () => forget() }, 'Forget'),
-        ));
-      }
-      status.replaceChildren(...parts);
-    };
-    const apply = async (extra) => {
-      const value = url.value.trim().replace(/\/+$/, '');
-      await Api.putWiki(value, extra);
-      App.config.wikiUrl = value || undefined;
-      url.value = value;
-      // The Documents block further down renders its lookup from this
-      // value; tell it, so the control appears without a page reload.
-      document.dispatchEvent(new CustomEvent('wiki-changed'));
-      status.replaceChildren(line(value ? 'Reading its catalog...' : ''));
-      show(await Api.getWiki(true));
-    };
-    const trust = (fingerprint) => apply({ trust: fingerprint }).catch((e) => show({ error: e.message }));
-    const forget = () => apply({ forget: true }).catch((e) => show({ error: e.message }));
-    const saveBtn = el('button', { class: 'primary' }, 'Save and test');
-    saveBtn.onclick = () => apply().catch((e) => show({ error: e.message }));
-    onEnterSubmit([url], () => saveBtn.click());
-    if (App.config.wikiUrl) Api.getWiki().then(show).catch((e) => show({ error: e.message }));
-    else show({ url: '', books: [] });
-    return el('div', { class: 'settings-block' },
-      el('div', { class: 'row' },
-        el('label', {}, 'Local wiki (optional)'),
-        el('span', { class: 'grow' }),
-        saveBtn,
-      ),
-      el('div', { class: 'row' }, url),
-      el('span', { class: 'muted' },
-        'A kiwix-serve, or a proxy in front of one, on your network. The document library and the ' +
-        'Reference material fold can then look articles up by title. The server fetches from this ' +
-        'address; the browser never does. An https address with a self-signed certificate works: ' +
-        'Save and test shows the certificate and offers to trust it.'),
-      status,
-    );
-  },
-
   /* ---------- documents ---------- */
 
   /*
@@ -907,26 +818,6 @@ const Settings = {
 
     for (const d of App.documents) addRow(d);
 
-    /*
-     * A looked-up article is one more unsaved row, like "+ add document": the
-     * Save button above is the one that keeps it. The control sits in a slot
-     * re-rendered when the wiki address changes, so saving an address in the
-     * block above makes it appear here without a reload. The listener removes
-     * itself once this block is no longer in the page, since Settings mounts
-     * fresh each time it is opened.
-     */
-    const lookupSlot = el('div', { class: 'col' });
-    const renderLookup = () => lookupSlot.replaceChildren(...[wikiLookup((doc) => {
-      addRow(doc);
-      return `Added "${doc.name}" below - press Save to keep it.`;
-    })].filter(Boolean));
-    const onWikiChanged = () => {
-      if (lookupSlot.isConnected) renderLookup();
-      else document.removeEventListener('wiki-changed', onWikiChanged);
-    };
-    renderLookup();
-    document.addEventListener('wiki-changed', onWikiChanged);
-
     return el('div', { class: 'settings-block' },
       el('div', { class: 'row' },
         el('label', {}, 'Documents (reference material to attach to conversations)'),
@@ -934,7 +825,6 @@ const Settings = {
         el('button', { onclick: () => addRow() }, '+ add document'),
         saveBtn,
       ),
-      lookupSlot,
       rowsWrap,
     );
   },

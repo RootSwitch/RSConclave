@@ -67,19 +67,6 @@ export interface ModelProfile {
 
 export interface AppConfig {
   endpoints: Endpoint[];
-  /*
-   * A kiwix-serve, or a proxy in front of one, that the document library can
-   * look articles up in. Optional: absent, the lookup controls do not render.
-   * The server is the only thing that ever fetches from it.
-   */
-  wikiUrl?: string;
-  /*
-   * For an https wiki whose certificate this machine does not otherwise
-   * trust: the SHA-256 fingerprint of the one certificate accepted there,
-   * chosen by a person in Settings after seeing it. Applies to the wiki
-   * lookups only. Dropped whenever the address changes.
-   */
-  wikiCert?: { fingerprint256: string; trustedAt: string };
 }
 
 /*
