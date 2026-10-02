@@ -64,7 +64,10 @@ and every transcript **exports** as markdown.
   (the + on a model row) at a different temperature or under a different persona - so two
   standing instructions can be put against each other on one question and judged by the
   consolidator. After the synthesis, ask a **follow-up round**:
-  every member answers the new question with its own previous answer as context. Give it a
+  every member answers the new question with its own previous answer as context - or, when it
+  is one answer you want to take up, **fork to chat** on that card opens a chat with that member
+  alone, holding the prompt and its answer exactly as it saw them, so your next message is a
+  reply to that answer and nothing else. Give it a
   **ballot** (a list of options) and every member is asked to finish with one of them, tallied
   above the responses - the prose still happens, because "four of five said yes" and the
   reasons they gave are useful for different things.

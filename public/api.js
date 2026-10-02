@@ -78,6 +78,7 @@ const Api = {
   deleteSessions: (ids) => Api._post('/api/sessions/delete', { ids }),
   resumeSession: (id) => Api._post(`/api/sessions/${id}/resume`),
   forkSession: (id, entryId) => Api._post(`/api/sessions/${id}/fork`, { entryId }),
+  forkToChat: (id, entryId) => Api._post(`/api/sessions/${id}/fork-chat`, { entryId }),
   importSession: (session) => Api._post('/api/sessions/import', session),
   setTags: (id, tags) =>
     Api._json(`/api/sessions/${id}`, {

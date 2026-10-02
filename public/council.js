@@ -742,7 +742,31 @@ const Council = {
     const isConsolidation = entry.kind === 'consolidation';
     const complete = entryComplete(entry, generating && entry === session.entries.at(-1));
     const actions = [copyButton(() => entry.text), forkButton(session.id, entry.id)];
-    if (!generating && entry.memberIndex !== undefined && entry.memberIndex >= 0 && !isConsolidation) {
+    /*
+     * The answer you want to argue with. A follow-up round asks every member
+     * again and "fork" keeps it a council; this opens a chat with this member
+     * alone, already holding the prompt and this answer, so the next message
+     * is a reply to it. Finished member answers only - see memberChat in
+     * server/council.ts for why a consolidation cannot be carried over.
+     */
+    const isMember = entry.memberIndex !== undefined && entry.memberIndex >= 0 && !isConsolidation;
+    if (!generating && complete && isMember && !entry.error && entry.text.trim()) {
+      actions.push(el('button', {
+        class: 'mini',
+        title: `Continue with ${entry.model} alone in a new chat. It starts with this council's prompt and this answer - ` +
+          'plus any earlier rounds, exactly as this member saw them - so your next message is a reply to this answer. ' +
+          'The council is left as it is.',
+        onclick: async (ev) => {
+          ev.stopPropagation();
+          try {
+            const { sessionId } = await Api.forkToChat(session.id, entry.id);
+            await openSession(sessionId);
+            renderSessionList();
+          } catch (err) { alert(err.message); }
+        },
+      }, 'fork to chat'));
+    }
+    if (!generating && isMember) {
       actions.push(el('button', { class: 'mini', onclick: () =>
         Api.councilRerunMember(session.id, entry.memberIndex).catch((e) => alert(e.message)) }, 'Re-run'));
     }

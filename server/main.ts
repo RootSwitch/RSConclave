@@ -791,6 +791,12 @@ route('POST', '/api/sessions/:id/fork', async (req, res, params) => {
   const s = engine.forkSession(userOf(req), params.id, String(entryId));
   sendJson(res, 200, { sessionId: s.id });
 });
+route('POST', '/api/sessions/:id/fork-chat', async (req, res, params) => {
+  const { entryId } = await readJsonBody(req, SMALL_BODY);
+  if (!entryId) throw new HttpError(400, 'entryId required');
+  const s = engine.forkAnswerToChat(userOf(req), params.id, String(entryId));
+  sendJson(res, 200, { sessionId: s.id });
+});
 
 /*
  * Import a session someone exported (or hand-wrote). This is the one route that

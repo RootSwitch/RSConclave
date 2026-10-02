@@ -1313,6 +1313,38 @@ export function forkSession(username: string, sessionId: string, entryId: string
 }
 
 /**
+ * Carry one council member's answer into a new chat with that member alone,
+ * so the next message is a reply to that answer. What the chat holds is
+ * council.memberChat's business; this only stores it and makes it live, as
+ * forkSession does. The council itself is untouched.
+ */
+export function forkAnswerToChat(username: string, sessionId: string, entryId: string): Session {
+  assertIdle(username);
+  const source = store.loadSession<Session>(username, sessionId);
+  if (!source) throw new InputError('session not found', 404);
+  if (source.mode !== 'council') throw new InputError('only a council answer can be continued in a chat');
+  const { chat, entries } = council.memberChat(source.config as CouncilConfig, source.entries, entryId, store.newId);
+  const now = new Date().toISOString();
+  const session: Session = {
+    id: store.newId(),
+    mode: 'chat',
+    title: `Chat: ${chat.model} on ${source.title.replace(/^Council: /, '')}`,
+    createdAt: now,
+    updatedAt: now,
+    config: chat,
+    entries,
+    status: 'paused',
+    // The council's fallback, not the seat's own endpoint: this is what a
+    // session reaches for when the seat's endpoint has since been deleted.
+    defaultEndpointId: source.defaultEndpointId ?? chat.endpointId,
+    forkedFrom: { sessionId: source.id, entryId, title: source.title },
+  };
+  if (source.tags?.length) session.tags = [...source.tags];
+  store.saveSession(username, session);
+  return resumeSession(username, session.id);
+}
+
+/**
  * Extend the last reply instead of starting a new one.
  *
  * A model that stops on its token budget leaves a sentence half-finished, and

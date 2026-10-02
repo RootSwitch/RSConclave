@@ -1,5 +1,6 @@
 // Council mode: transcript assembly and consolidator prompt templating.
-import type { ChatMessage, CouncilConfig, CouncilMember, Document, Persona, TranscriptEntry } from './types.ts';
+import type { ChatConfig, ChatMessage, CouncilConfig, CouncilMember, Document, Persona, TranscriptEntry } from './types.ts';
+import { InputError } from './errors.ts';
 import { incompleteNote, isFinishedTurn, stripThink } from './text.ts';
 import { ballotInstruction } from './vote.ts';
 import { renderMemoryLayer } from './memory.ts';
@@ -151,4 +152,75 @@ export function buildMemberHistory(
     if (lastUser) lastUser.content += ballotInstruction(ballot);
   }
   return msgs;
+}
+
+/**
+ * One member's answer, carried into a chat with that member alone.
+ *
+ * A council answer you want to argue with has nowhere to go: a follow-up
+ * round asks every member again, and forking keeps it a council. This builds
+ * the chat that member would have been in - its seat's model, settings,
+ * persona and the council's documents, and the transcript exactly as
+ * buildMemberHistory hands it to that member: every prompt up to the chosen
+ * answer, its own latest finished answer in each earlier round, and the
+ * chosen answer itself last. Other members' answers are not there, because
+ * the member never saw them; the next message is a reply to this answer and
+ * nothing else.
+ *
+ * Member answers only. A consolidator was never asked the question on its
+ * own - it was handed every answer through a template - so a chat holding
+ * the prompt and its synthesis would be missing the very answers it was
+ * synthesising, and anything asked about them would be answered from nothing.
+ */
+export function memberChat(
+  config: CouncilConfig,
+  entries: TranscriptEntry[],
+  entryId: string,
+  newId: () => string,
+): { chat: ChatConfig; entries: TranscriptEntry[] } {
+  const cut = entries.findIndex((e) => e.id === entryId);
+  if (cut < 0) throw new InputError('that entry is not part of this session', 404);
+  const target = entries[cut];
+  if (target.kind === 'consolidation') {
+    throw new InputError('a consolidation cannot be continued as a chat - the consolidator was handed every answer at once, and a chat with it would not have them');
+  }
+  const seat = target.memberIndex ?? -1;
+  if (target.kind !== 'participant' || seat < 0) throw new InputError('only a council member\'s answer can be continued in a chat');
+  if (!isFinishedTurn(target)) throw new InputError('that answer did not finish - re-run the member first');
+  const member = config.members[seat];
+  if (!member) throw new InputError('that answer\'s seat is no longer in this council\'s config');
+
+  const out: TranscriptEntry[] = [];
+  let pending: TranscriptEntry | null = null;
+  const flush = () => {
+    if (!pending) return;
+    out.push({
+      id: newId(),
+      ts: pending.ts,
+      kind: 'participant',
+      speaker: member.model,
+      model: pending.model ?? member.model,
+      text: pending.text,
+      ...(pending.stats ? { stats: { ...pending.stats } } : {}),
+      ...(pending.truncated ? { truncated: true } : {}),
+    });
+    pending = null;
+  };
+  // Up to and including the chosen answer: a re-run that came after it in the
+  // same round, and every later round, belong to a conversation it never had.
+  for (const e of entries.slice(0, cut + 1)) {
+    if (e.kind === 'user') {
+      flush();
+      out.push({ id: newId(), ts: e.ts, kind: 'user', speaker: 'You', text: e.text });
+    } else if (e.kind === 'participant' && e.memberIndex === seat && (e === target || isFinishedTurn(e))) {
+      pending = e; // last one in the round wins, as in buildMemberHistory
+    }
+  }
+  flush();
+
+  const chat: ChatConfig = { endpointId: member.endpointId, model: member.model };
+  if (member.params && Object.keys(member.params).length) chat.params = { ...member.params };
+  if (member.personaId) chat.personaId = member.personaId;
+  if (config.documentIds?.length) chat.documentIds = [...config.documentIds];
+  return { chat, entries: out };
 }
