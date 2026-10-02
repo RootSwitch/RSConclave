@@ -13,6 +13,9 @@ const Council = {
     this.root = document.getElementById('view-council');
     App.session = session;
     this.root.replaceChildren();
+    // Set again below when this session has the fold; a fresh setup has none,
+    // and the previous session's elements must not be written to.
+    this.reconsolidate = null;
 
     const scroll = el('div', { class: 'view-scroll' });
     this.root.append(scroll);
@@ -87,27 +90,47 @@ const Council = {
     if (App.config.endpoints.length) fillModels(cfg.model);
     endpointSel.onchange = () => fillModels();
 
+    /*
+     * Worded from the state, not fixed at mount: "Re-run" only once a
+     * consolidation exists, and "was off" only when it really was. Set once
+     * at mount, a normal council mid-run claimed consolidation was off, and
+     * kept claiming it after the consolidation landed, because this view is
+     * not remounted when a run finishes - renderCards calls syncReconsolidate.
+     */
+    const summaryEl = el('summary', {});
+    const runBtn = el('button', { class: 'primary', onclick: async () => {
+      if (!modelSel.value) return;
+      try {
+        await Api.councilConsolidate(
+          session.id, templateEl.value,
+          endpointSel.value, modelSel.value, genParams(undefined, ctxEl.value, maxOutEl.value),
+        );
+      } catch (err) { alert(err.message); }
+    } });
+    this.reconsolidate = { summaryEl, runBtn };
+    this.syncReconsolidate(session);
     return el('details', { style: 'margin-bottom: 12px' },
-      el('summary', {}, 'Re-run consolidation (change engine or template)'),
+      summaryEl,
       el('div', { class: 'col' },
         el('div', { class: 'row' },
           el('label', {}, 'Consolidator'), endpointSel, modelSel, ctxEl,
           el('span', { class: 'muted', title: 'It reads every response at once, so it needs the largest window of the run' }, 'needs the most room'),
         ),
         templateEl,
-        el('div', { class: 'row' },
-          el('button', { class: 'primary', onclick: async () => {
-            if (!modelSel.value) return;
-            try {
-              await Api.councilConsolidate(
-                session.id, templateEl.value,
-                endpointSel.value, modelSel.value, genParams(undefined, ctxEl.value, maxOutEl.value),
-              );
-            } catch (err) { alert(err.message); }
-          } }, 'Re-run consolidation'),
-        ),
+        el('div', { class: 'row' }, runBtn),
       ),
     );
+  },
+
+  syncReconsolidate(session) {
+    if (!this.reconsolidate) return;
+    const ran = session.entries.some((e) => e.kind === 'consolidation');
+    this.reconsolidate.summaryEl.textContent = ran
+      ? 'Re-run consolidation (change engine or template)'
+      : session.config.skipConsolidation
+        ? 'Consolidate these answers (consolidation was off for this run)'
+        : 'Consolidate these answers (change engine or template)';
+    this.reconsolidate.runBtn.textContent = ran ? 'Re-run consolidation' : 'Consolidate';
   },
 
   buildSetup() {
@@ -700,7 +723,9 @@ const Council = {
             el('div', { class: 'card-body' })));
         }
       });
-      if (!afterUser.some((e) => e.kind === 'consolidation')) {
+      // Not when consolidation was switched off for this council: the engine
+      // never calls the consolidator then, and this card announced it anyway.
+      if (!cfg.skipConsolidation && !afterUser.some((e) => e.kind === 'consolidation')) {
         this.cardsWrap.append(el('div', { class: 'card consolidation' },
           el('div', { class: 'card-header' },
             el('span', { class: 'model-name' }, `Consolidation - ${cfg.consolidator.model}`),
@@ -709,6 +734,7 @@ const Council = {
       }
     }
 
+    this.syncReconsolidate(session);
     this.renderFollowup(session, generating);
   },
 
@@ -760,7 +786,15 @@ const Council = {
 
   renderFollowup(session, generating) {
     this.followupWrap.replaceChildren();
-    if (generating || !session.entries.some((e) => e.kind === 'consolidation')) return;
+    /*
+     * A round is over when it has been consolidated - or, for a council run
+     * without consolidation, when the members have answered. Waiting for a
+     * consolidation alone meant a council with it switched off never offered
+     * a follow-up, though the engine runs one happily.
+     */
+    const roundOver = session.entries.some((e) => e.kind === 'consolidation')
+      || (session.config.skipConsolidation && session.entries.some((e) => e.kind === 'participant'));
+    if (generating || !roundOver) return;
     // Drafted: this band is rebuilt on every state event, which used to eat a
     // half-written follow-up whenever anything else happened.
     const draftKey = `council-followup:${session.id}`;
