@@ -27,11 +27,18 @@ export class InputError extends Error {
  * undefined but a JSON number reaches `.trim` and throws TypeError, which
  * escaped as a 500. Coerce nothing silently - a number where a message belongs
  * is a mistake worth reporting.
+ *
+ * No length limit of its own unless a caller asks for one. It used to default
+ * to 200,000 characters, which applied to chat messages and council follow-ups
+ * but not to a council's opening prompt - that never came through here - so a
+ * 236,000-character file could open a council and then be refused by a chat.
+ * The request size is the one limit on text now, the same for every mode, and
+ * readJsonBody words it for a person (see tooLargeMessage in router.ts).
  */
-export function requireText(value: unknown, label: string, max = 200_000): string {
+export function requireText(value: unknown, label: string, max?: number): string {
   if (typeof value !== 'string') throw new InputError(`${label} must be text`);
   const trimmed = value.trim();
   if (!trimmed) throw new InputError(`${label} is empty`);
-  if (trimmed.length > max) throw new InputError(`${label} is too long (limit ${max} characters)`);
+  if (max !== undefined && trimmed.length > max) throw new InputError(`${label} is too long (limit ${max} characters)`);
   return trimmed;
 }

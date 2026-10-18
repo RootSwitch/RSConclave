@@ -31,6 +31,29 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**One size limit for everything you send.** A 236,000-character DIGEST.md
+opened a council and was then refused by a chat: chat messages, council
+follow-ups and roundtable turns had a 200,000-character cap of their own,
+while a council's opening prompt - which never went through that check - was
+bounded only by the 1 MB request size. The separate cap is gone, so the
+request size is the one limit everywhere, and it now says what it is when it
+is hit - 1 MB, about a million characters or 250,000 tokens - and that a file
+that size belongs in the document library, where the limit is 10 MB. A
+refused chat message stays in the compose box.
+
+**Fork one council answer into a chat with that member.** "fork to chat" on a
+finished member's card opens a chat with that model alone, holding the
+transcript exactly as it saw it - the prompt, its own earlier rounds, and the
+chosen answer - so the next message is a reply to that answer. Consolidations
+are excluded: the consolidator is handed every answer through a template, and
+a chat with it would not have them.
+
+**A council run without consolidation no longer announces one.** It drew a
+"Consolidation, awaiting responses" card in every round though the
+consolidator was never called, withheld the follow-up box because no
+consolidation existed, and offered to "re-run" a consolidation that had never
+run.
+
 **Switch an endpoint off when its box is powered down.** A sleeping host does
 not refuse a connection, it never answers - so every form that enumerates
 endpoints pays its full timeout for each one. Measured on a six-host fleet

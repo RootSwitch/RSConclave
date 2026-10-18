@@ -37,6 +37,23 @@ export const SMALL_BODY = 4 * 1024;
 /** Session import, the one route that legitimately carries a large document. */
 export const BIG_BODY = 10 * 1024 * 1024;
 
+/**
+ * What a person sees when a request is over its cap. For anything typed or
+ * pasted - a chat message, a council prompt or follow-up, a roundtable turn,
+ * a pipeline input - this is the only size limit there is, so it has to say
+ * what the limit is and where a bigger file goes. "body too large" said
+ * neither, and it was never seen while a separate 200,000-character check
+ * always answered first; see requireText in errors.ts.
+ */
+export function tooLargeMessage(max: number): string {
+  const mb = max / (1024 * 1024);
+  const size = mb >= 1 ? `${Number.isInteger(mb) ? mb : mb.toFixed(1)} MB` : `${Math.round(max / 1024)} KB`;
+  if (max !== MAX_BODY) return `That is too large to send: the limit here is ${size}.`;
+  return `That is too large to send: the limit is ${size} per message, about a million characters ` +
+    'of plain text or roughly 250,000 tokens. A file that size fits in the document library ' +
+    'in Settings, attached to the conversation instead of pasted.';
+}
+
 export function readJsonBody(req: IncomingMessage, max = MAX_BODY): Promise<any> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -47,7 +64,7 @@ export function readJsonBody(req: IncomingMessage, max = MAX_BODY): Promise<any>
     const declared = Number(req.headers['content-length']);
     if (Number.isFinite(declared) && declared > max) {
       req.resume();
-      reject(new HttpError(413, 'body too large'));
+      reject(new HttpError(413, tooLargeMessage(max)));
       return;
     }
 
@@ -70,7 +87,7 @@ export function readJsonBody(req: IncomingMessage, max = MAX_BODY): Promise<any>
         tooLarge = true;
         chunks.length = 0; // stop holding what we read
         req.resume();
-        reject(new HttpError(413, 'body too large'));
+        reject(new HttpError(413, tooLargeMessage(max)));
         return;
       }
       chunks.push(c);

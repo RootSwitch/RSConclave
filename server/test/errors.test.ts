@@ -29,9 +29,13 @@ test('requireText rejects blank and whitespace-only input', () => {
   assert.throws(() => requireText('   \n\t ', 'message'), /message is empty/);
 });
 
-test('requireText returns the trimmed string and enforces a limit', () => {
+test('requireText returns the trimmed string, and enforces a limit only when given one', () => {
   assert.equal(requireText('  hello  ', 'text'), 'hello');
   assert.throws(() => requireText('abcdef', 'text', 3), /too long/);
+  // No cap of its own: the request size is the limit, the same in every mode.
+  // It used to default to 200,000 characters, which stopped a chat message
+  // that a council's opening prompt would have taken.
+  assert.equal(requireText('z'.repeat(300_000), 'message').length, 300_000);
 });
 
 test('requireText failures carry a 400', () => {
