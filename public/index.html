@@ -12,6 +12,8 @@
   <script>
     /* Apply the saved palette before first paint so the app never flashes Classic. */
     try { const s = localStorage.getItem('rsconclave.theme') || localStorage.getItem('conclave.theme'); if (s) applyTheme(s); } catch {}
+    /* And wide mode, or a wide-mode page would draw its column first and jump. */
+    try { applySavedWide(); } catch {}
   </script>
 </head>
 <body>
@@ -33,6 +35,8 @@
       <span class="user-name badge"></span>
       <button class="mini" title="Sign out of this browser" onclick="Auth.logout()">Sign out</button>
     </span>
+    <button id="wide-toggle" class="mini" aria-pressed="false"
+      title="Wide mode: let conversations, cards and forms use the whole window instead of a centered column">Wide</button>
     <label for="theme">Theme</label>
     <select id="theme" aria-label="Colour theme"></select>
   </div>

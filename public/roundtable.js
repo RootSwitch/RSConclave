@@ -32,7 +32,7 @@ const Roundtable = {
 
     // active or historical session: transcript + gate bar
     const titleEl = el('h3', { class: 'view-title' }, session.title);
-    const header = el('div', { style: 'padding: 14px 22px 0' },
+    const header = el('div', { class: 'transcript-head', style: 'padding: 14px 20px 0' },
       el('div', { class: 'row' },
         titleEl,
         renameButton(session.id, () => App.session.title, (t) => { App.session.title = t; titleEl.textContent = t; }),

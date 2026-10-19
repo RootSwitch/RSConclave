@@ -59,6 +59,42 @@ function applyTheme(name) {
     try { localStorage.setItem(THEME_KEY, name); } catch {}
 }
 
+/*
+ * Wide mode: the reading column (see "The reading column" in style.css)
+ * lifted, so sessions use the whole window. Per browser, like the theme, and
+ * stored only while on - off is the absence of the key, so a browser that
+ * never pressed it holds nothing extra. The key is the theme's with its last
+ * part swapped, so a fork with its own theme key gets its own wide key too.
+ */
+const WIDE_KEY = THEME_KEY.replace(/\.theme$/, '.wide');
+
+function applyWide(on) {
+    document.documentElement.classList.toggle('wide', on);
+    const btn = document.getElementById('wide-toggle');
+    if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
+/** Called before first paint from index.html, so a wide page never draws narrow first. */
+function applySavedWide() {
+    let on = false;
+    try { on = localStorage.getItem(WIDE_KEY) === '1'; } catch {}
+    applyWide(on);
+}
+
+function initWideToggle() {
+    const btn = document.getElementById('wide-toggle');
+    if (!btn) return;
+    applySavedWide();
+    btn.addEventListener('click', () => {
+        const on = !document.documentElement.classList.contains('wide');
+        applyWide(on);
+        try {
+            if (on) localStorage.setItem(WIDE_KEY, '1');
+            else localStorage.removeItem(WIDE_KEY);
+        } catch {}
+    });
+}
+
 function initThemePicker() {
     const sel = document.getElementById('theme');
     if (!sel) return;

@@ -153,6 +153,12 @@ RSConclave wears the **Canvas Suite** design language: fifteen `--se-*` custom p
 bar - the choice persists in `localStorage` and is applied before first paint. Adding a colour
 means adding it to the fifteen, not to a component.
 
+Everything you read and type in a session - messages, council and pipeline cards, the
+summarise fold, the input box, the setup forms - shares one centered column, 900px at most, so
+a reply and the box you answer it in line up and a line of text stays readable on a wide
+monitor. **Wide**, beside the theme picker, lifts the column so everything uses the whole
+window; like the theme, it is remembered per browser. Settings is always full width.
+
 ## Context windows
 
 This is the setting most worth understanding, because getting it wrong is silent.
@@ -546,8 +552,10 @@ Sessions export as markdown from the UI (`/api/sessions/<id>/export.md`).
 files hold every prompt and response verbatim, written after each completed turn. Deleting a
 session in the UI deletes that file.
 
-**localStorage holds exactly one thing:** `rsconclave.theme`, the name of your chosen palette.
-No prompts, no transcripts, no identifiers.
+**localStorage holds four display choices and nothing else:** `rsconclave.theme`, the name of
+your chosen palette; `rsconclave.hideThinking`, whether reasoning is folded away;
+`rsconclave.sidebarWidth`, where you dragged the sidebar's edge; and `rsconclave.wide`, present
+only while wide mode is on. No prompts, no transcripts, no identifiers.
 
 **What is logged:** nothing. The server writes a couple of lines to stdout at startup and
 nothing after that - no access log, no prompt log, no error log to disk. Crashes print to the

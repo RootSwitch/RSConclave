@@ -31,6 +31,19 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**One centered column for every session, and a Wide toggle beside Theme.** Chat
+messages stopped at 900px against the left edge while the input bar and the
+summarise fold beneath them, and every council and pipeline card, ran the full
+width - on a 2,560px monitor that was replies hugging the left over a 2,300px
+input bar, and council lines 300 characters long. Messages, cards, folds, the
+input box, the follow-up box and the setup forms now share one centered
+column, 900px at most, and their edges line up at every width: the scrollers
+and the input bar reserve scrollbar room on both sides, so the column sits on
+the same line whether or not a page scrolls. **Wide**, beside the theme
+picker, lifts the cap so everything stretches with the window, still aligned;
+it is remembered per browser and applied before first paint, and hidden on a
+phone, which is narrower than the column anyway. Settings stays full width.
+
 **One size limit for everything you send.** A 236,000-character DIGEST.md
 opened a council and was then refused by a chat: chat messages, council
 follow-ups and roundtable turns had a 200,000-character cap of their own,

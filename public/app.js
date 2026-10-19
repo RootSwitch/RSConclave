@@ -2159,6 +2159,7 @@ function initSidebarResize() {
 /* ---------- init ---------- */
 async function init() {
   initThemePicker();
+  initWideToggle();
   initDrawer();
   initSidebarResize();
   /*
