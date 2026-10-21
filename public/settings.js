@@ -310,7 +310,8 @@ const Settings = {
                 el('span', { class: 'muted', style: 'flex: 1' },
                   'Loads each model twice to find its real cost per token, then loads once more at its own '
                   + 'answer to check the card really takes it. Allow a minute or two per model. '
-                  + 'Nothing is written unless you press Bake in.'),
+                  + 'Measuring fills in each model\'s box; you can type any num_ctx there instead, measured '
+                  + 'or not. Nothing is written unless you press Bake.'),
                 allBtn, progress),
               !Number(els.vram.value) ? el('span', { class: 'error-text' },
                 'Set this endpoint\'s VRAM GB above and Save first - there is no way to read the card over HTTP.') : null,
@@ -453,6 +454,73 @@ const Settings = {
     const out = el('span', { class: 'muted' });
     const actions = el('span', { class: 'row' });
     const btn = el('button', { class: 'mini' }, 'Measure');
+    let last = null; // the latest measurement, read by the bake warnings
+
+    /*
+     * Bake ANY num_ctx, at any time - not only the number a measurement
+     * produced. The measured answer stops 15% short of the card, and for a
+     * model past that margin, or too big for the card at all (gpt-oss:120b,
+     * llama4:scout), a measurement offers nothing to bake. Those are the
+     * models where a fixed window is wanted most: a CPU-bound model you do not
+     * want to configure in every chat, or a near-fit you want to run with less
+     * headroom on purpose. A measurement fills the box in; you can overwrite it.
+     */
+    const ctxBox = ctxInput();
+    ctxBox.min = '2048';
+    ctxBox.placeholder = 'num_ctx';
+    ctxBox.title = 'The context window to bake into this model on the box. Measure fills in its recommendation; '
+      + 'any whole number from 2048 works, including for models too big to measure.';
+    const bakeNote = el('span', { class: 'muted' });
+    const bakeBtn = el('button', { class: 'mini', title:
+      'Writes this num_ctx into the model on the box. Every client of that daemon gets it - the ollama CLI, '
+      + 'an editor plugin, this app - not just this app.' }, 'Bake');
+    const showCurrent = () => {
+      const info = App.modelInfo(endpointId, model);
+      if (!info) return;
+      // The window it has now, where you will type the one you want.
+      ctxBox.placeholder = info.numCtx ? String(info.numCtx) : 'default';
+      ctxBox.title = `${ctxBox.title.split('\n')[0]}\nNow: ${info.numCtx ? `num_ctx ${info.numCtx} baked in` : 'not set - the Ollama default'}`
+        + (info.contextLength ? `; trained for ${info.contextLength}.` : '.');
+    };
+    App.loadModelInfo(endpointId).then(showCurrent).catch(() => {});
+    bakeBtn.onclick = async () => {
+      // Each press starts clean, or a declined bake keeps saying whatever the
+      // previous attempt said.
+      bakeNote.className = 'muted';
+      bakeNote.textContent = '';
+      const n = parseInt(ctxBox.value, 10);
+      if (!Number.isInteger(n) || n < 2048) {
+        bakeNote.className = 'error-text';
+        bakeNote.textContent = 'a whole number of at least 2048';
+        return;
+      }
+      const trained = last?.trainedMax ?? App.modelInfo(endpointId, model)?.contextLength ?? null;
+      const spilledAt = last?.verified?.spilledAt ?? null;
+      const warnings = [];
+      if (trained && n > trained) {
+        warnings.push(`${n} is past the ${trained} tokens this model was trained for. Ollama will accept it, `
+          + `but answers degrade once a conversation runs past ${fmtK(trained)}.`);
+      }
+      if (spilledAt && n >= spilledAt) {
+        warnings.push(`When measured, it spilled into system RAM at ${spilledAt}. At ${n} expect part of it `
+          + 'to run on the CPU, and much more slowly.');
+      }
+      if (warnings.length && !confirm(`${warnings.join('\n\n')}\n\nBake num_ctx ${n} into ${model} anyway?`)) return;
+      bakeBtn.disabled = true;
+      bakeNote.className = 'muted';
+      bakeNote.textContent = 'baking…';
+      try {
+        await Api.applyNumCtx(endpointId, model, n);
+        bakeNote.textContent = `baked in at ${fmtK(n)}`;
+        App.modelInfoByEndpoint = {}; // the window it reports just changed
+        App.loadModelInfo(endpointId).then(showCurrent).catch(() => {});
+      } catch (err) {
+        bakeNote.className = 'error-text';
+        bakeNote.textContent = err.message;
+      }
+      bakeBtn.disabled = false;
+    };
+    onEnterSubmit([ctxBox], () => bakeBtn.click());
 
     /*
      * GiB everywhere, labelled GB - which is what the card's box says, what
@@ -484,6 +552,7 @@ const Settings = {
       out.textContent = 'loading it twice on the box…';
       try {
         const r = await Api.measureCtx(endpointId, model);
+        last = r;
         actions.replaceChildren();
         const perK = (r.bytesPerToken * 1024) / 1048576;
         const parts = [
@@ -523,27 +592,12 @@ const Settings = {
           if (r.vram.otherModels.length) {
             out.textContent += ` Held by ${r.vram.otherModels.join(', ')}: ${GB(r.vram.heldByOthersBytes)} GB.`;
           }
-          if (r.currentNumCtx === r.recommended) {
-            actions.append(el('span', { class: 'muted' }, 'already set'));
-          } else {
-            actions.append(el('button', { class: 'mini', title:
-              'Writes num_ctx into the model on the box. Every client of that daemon gets it, not just this app.',
-              onclick: async (e) => {
-                const b = e.target;
-                b.disabled = true;
-                b.textContent = 'baking…';
-                try {
-                  await Api.applyNumCtx(endpointId, model, r.recommended);
-                  b.replaceWith(el('span', { class: 'muted' }, `baked in at ${fmtK(r.recommended)}`));
-                  App.modelInfoByEndpoint = {}; // the window it reports just changed
-                } catch (err) {
-                  b.disabled = false;
-                  b.textContent = 'Bake in';
-                  out.className = 'error-text';
-                  out.textContent = err.message;
-                }
-              } }, 'Bake in'));
-          }
+          // The recommendation goes into the bake box rather than onto a
+          // button of its own: one control bakes whatever number is in it,
+          // measured or typed, so there is no second path to keep in step.
+          ctxBox.value = String(r.recommended);
+          bakeNote.className = 'muted';
+          bakeNote.textContent = r.currentNumCtx === r.recommended ? 'already set to this' : '';
         }
       } catch (err) {
         actions.replaceChildren();
@@ -558,7 +612,7 @@ const Settings = {
 
     btn.onclick = run;
     const row = el('div', { class: 'row' },
-      el('span', { class: 'code-chip' }, model), btn, actions, out);
+      el('span', { class: 'code-chip' }, model), btn, ctxBox, bakeBtn, bakeNote, actions, out);
     // The batch needs the runner and the button (to disable it while another
     // model is being measured - the server cancels an in-flight measurement
     // when a second one starts, so two at once would silently kill the first).

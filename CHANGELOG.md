@@ -31,6 +31,18 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**Bake any num_ctx from Context sizing, measured or not.** The only bake
+button appeared after a measurement and wrote the measured answer, so a model
+past the 15% safety margin - "nothing fits", though qwen3.5:35b-a3b turned
+out to hold 48k fully on a 24 GB 7900XTX - and a model too big for the card
+at all, like gpt-oss:120b, could never be given a window from here. Each
+model's row now has a box and a Bake button: measuring fills the box with the
+recommendation, and any whole number from 2048 can be typed instead, to use
+some of the margin on purpose or to fix the window of a model that will run on
+the CPU anyway. The placeholder shows what is baked in now. It asks first only
+for a number past the model's trained maximum, or at or past where a
+measurement saw it spill into system RAM.
+
 **One centered column for every session, and a Wide toggle beside Theme.** Chat
 messages stopped at 900px against the left edge while the input bar and the
 summarise fold beneath them, and every council and pipeline card, ran the full

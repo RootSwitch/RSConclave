@@ -234,6 +234,16 @@ RSConclave:
 ./tools/measure-ctx.sh qwen3-coder:30b --vram 24 --apply
 ```
 
+The same measurement runs in the app with no terminal: Settings, an Ollama endpoint, **Context
+sizing**. Give the endpoint its card's size in **VRAM GB** first, because the app reaches the box
+over HTTP and cannot see the hardware. It aims 15% below the card - a 24 GB card is sized against
+20.4 GB - to leave room for a desktop, a browser, or a second model, and it confirms its answer by
+loading the model at it. Every model has a box beside it: measuring fills in the recommendation,
+and you can type any `num_ctx` there instead - more of the card than the margin allows, or a fixed
+window for a model too big to measure at all, such as a 120B that runs mostly on the CPU - and
+**Bake** writes it into the model the way `--apply` does. It asks first only when the number is
+past what the model was trained for, or past where a measurement saw it spill into system RAM.
+
 Building the inference host from scratch, NVIDIA or AMD, is covered in
 [docs/inference-host.md](docs/inference-host.md), and `tools/install-ollama.sh` does the
 Ollama half of it in one shot. [tools/README.md](tools/README.md) indexes every script here.
