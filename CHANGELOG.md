@@ -31,6 +31,25 @@ chat, council and pipeline setup forms carry a muted line and a button straight
 to Settings, matching how personas already behave, and both disappear for good
 once a document exists.
 
+**Context sizing reports the ceiling as well as the recommendation.** The
+recommendation aims 15% below the card and its confirming load only ever
+walks down, so it never said how much context the card really holds. A
+survey of a 24 GB 7900XTX and a 24 GB 3090 found the real ceiling - the
+largest num_ctx that loads 100% into VRAM - at 1.5 to 2 times the
+recommendation for dense models (qwen3-coder:30b 28k against 56k, qwen2.5:32b
+8k against 16k), 8-12k above it where the coarse confirming search stopped
+early (gemma4:31b, laguna), and present where there was no recommendation at
+all (qwen3.5:35b-a3b holds 48k though its weights overrun the margin). After
+confirming, the measurement now keeps loading until the model spills and
+narrows to one 4k step, costing two to six more loads. Settings shows both
+numbers with a button each that fills the bake box; the shell script prints
+both. For a model whose /api/ps sizes visibly under-state its memory -
+qwen3.8:27b filled the card while reporting 16.4 GB, gemma4:26b reported 1.2 GB
+for 17 GB of weights - the GB figures are withheld and the fit, which was
+checked by loading, is what is shown. The script also clamps a zero slope as
+the app always did, where it used to divide by zero and abort on models whose
+two probes report the same size.
+
 **Bake any num_ctx from Context sizing, measured or not.** The only bake
 button appeared after a measurement and wrote the measured answer, so a model
 past the 15% safety margin - "nothing fits", though qwen3.5:35b-a3b turned

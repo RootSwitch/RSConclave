@@ -11,6 +11,12 @@
 # almost nothing per token, dense GQA models cost a lot), the quantisation,
 # and how much VRAM you actually have free. So measure instead of guessing.
 #
+# Two answers come back: the recommendation, 15% below the card so a desktop,
+# a browser or a second model still fit beside it, and the ceiling - the most
+# the card holds with no margin, found by loading until the model spills. The
+# first is what --apply bakes; the second is there to spend the margin on
+# purpose, by hand.
+#
 # Method: load the model twice at two known context sizes, read the real
 # footprint from Ollama's /api/ps, and take the slope. That gives bytes per
 # token for THIS model on THIS card, which extrapolates to the largest window
@@ -282,7 +288,21 @@ BEGIN {
     hi_total = b[1]; hi_vram = b[2];
 
     slope = (hi_total - lo_total) / (hi - lo);          # bytes per token
+    # Clamped, as server/measure.ts clamps it. Two probes that come back the
+    # same size are information - Ollama rounds, and some models do not report
+    # their context growth at all (gemma4:31b and laguna on 24 GB cards) - not
+    # a reason to divide by zero and abort. The trained cap does the real work.
+    if (slope < 1) slope = 1;
     base  = lo_total - slope * lo;                      # weights + fixed buffers
+
+    # For the ceiling search below the report: the largest window the WHOLE
+    # stated card would hold by this arithmetic, no margin. A line the shell
+    # reads and strips, so the search starts where the app search does.
+    nm = int(((vram * 1073741824) - base) / slope / 4096) * 4096;
+    # Clamped on its own line: inside printf arguments awk reads ">" as output
+    # redirection, so "nm > 0 ? nm : 0" there is a syntax error, not a test.
+    if (nm < 0) nm = 0;
+    printf "##ceiling-from %d\n", nm;
 
     # Ollama refuses to place a model that would not comfortably fit, so aim
     # below the nameplate figure rather than at it.
@@ -367,7 +387,7 @@ BEGIN {
     printf "  curl -X POST %s/api/create -H '"'"'content-type: application/json'"'"' \\\n", host;
     printf "    -d '"'"'{\"model\":\"%s\",\"from\":\"%s\",\"parameters\":{\"num_ctx\":%d},\"stream\":false}'"'"'\n", model, model, p;
 }')
-printf '%s\n' "$REPORT"
+printf '%s\n' "$REPORT" | grep -v '^##'
 
 # Verify the recommendation by loading at it, and walk it down until the card
 # takes the whole model.
@@ -380,19 +400,38 @@ printf '%s\n' "$REPORT"
 # neither is visible from the low end of the curve. So the answer stops being
 # extrapolated and starts being confirmed.
 REC=$(printf '%s\n' "$REPORT" | sed -n 's/.*Recommended num_ctx *: *\([0-9][0-9]*\).*/\1/p')
+
+# Three answers, not two. An empty /api/ps read - a transient miss, or a
+# model still settling after a long load - printed NOTHING, which is not
+# equal to "0", so the caller's `= "0"` test fell through to the success
+# branch and announced "confirmed resident" having verified nothing. A
+# check that cannot fail closed is not a check.
+resident_at() { # num_ctx -> yes | no | unknown
+    probe "$1" | awk 'NF >= 2 { print ($2 >= $1 * 0.999 && $1 > 0) ? "yes" : "no"; seen = 1 }
+                      END { if (!seen) print "unknown" }'
+}
+# What every load so far proved, for the ceiling search: CL the largest
+# num_ctx the card took whole, CH the smallest that spilled. "unknown" counts
+# as a spill - the search must narrow from the cautious side.
+CL=""; CH=""
+note() { # $1 = num_ctx, $2 = yes | no | unknown
+    if [ "$2" = "yes" ]; then
+        if [ -z "$CL" ] || [ "$1" -gt "$CL" ]; then CL=$1; fi
+    else
+        if [ -z "$CH" ] || [ "$1" -lt "$CH" ]; then CH=$1; fi
+    fi
+}
+res_of() { # "total vram" -> yes | no
+    awk -v s="$1" 'BEGIN { split(s, a, " "); print (a[1] > 0 && a[2] >= a[1] * 0.999) ? "yes" : "no" }'
+}
+note "$LOW" "$(res_of "$LOW_OUT")"
+note "$HIGH" "$(res_of "$HIGH_OUT")"
+
 if [ -n "$REC" ] && [ "$REC" -gt "$HIGH" ] 2>/dev/null; then
-    # Three answers, not two. An empty /api/ps read - a transient miss, or a
-    # model still settling after a long load - printed NOTHING, which is not
-    # equal to "0", so the caller's `= "0"` test fell through to the success
-    # branch and announced "confirmed resident" having verified nothing. A
-    # check that cannot fail closed is not a check.
-    resident_at() { # num_ctx -> yes | no | unknown
-        probe "$1" | awk 'NF >= 2 { print ($2 >= $1 * 0.999 && $1 > 0) ? "yes" : "no"; seen = 1 }
-                          END { if (!seen) print "unknown" }'
-    }
     echo ""
     echo "verifying at num_ctx=$REC ..."
     VERDICT=$(resident_at "$REC")
+    note "$REC" "$VERDICT"
     if [ "$VERDICT" = "unknown" ]; then
         echo "  could not read /api/ps after loading at $REC - NOT verified."
         echo "  Leaving the arithmetic's answer in place; re-run to check it."
@@ -410,6 +449,7 @@ if [ -n "$REC" ] && [ "$REC" -gt "$HIGH" ] 2>/dev/null; then
             # "spilled" up front described the PREVIOUS step and called
             # every resident midpoint a failure.
             V=$(resident_at "$MID")
+            note "$MID" "$V"
             # Only an explicit "yes" moves the floor up. An unreadable probe
             # must narrow from the cautious side, never widen the claim.
             if [ "$V" = "yes" ]; then LO=$MID; echo "resident"; else HI=$MID; echo "$V"; fi
@@ -424,6 +464,72 @@ if [ -n "$REC" ] && [ "$REC" -gt "$HIGH" ] 2>/dev/null; then
         echo "  confirmed resident at $REC."
     fi
     unload
+fi
+
+# The ceiling: the most the card takes whole, with no margin at all - the
+# other end of the choice the recommendation makes for you. The recommendation
+# stops 15% short on purpose; on a 24 GB 7900XTX the real ceiling was 1.5x to
+# 2x it for dense models, and it is the only number on offer for a model whose
+# weights alone overrun the margin. Same search as findCeiling in
+# server/measure.ts: reach up from what is proven resident until something
+# spills, then narrow to one 4k step. Reported, never applied - --apply still
+# bakes the recommendation, so a number with no headroom is always a choice.
+CEIL_FROM=$(printf '%s\n' "$REPORT" | sed -n 's/^##ceiling-from \([0-9][0-9]*\)$/\1/p')
+if [ -n "$CEIL_FROM" ]; then
+    echo ""
+    if [ -n "$CL" ] && [ -n "$CH" ] && [ "$CH" -le "$CL" ]; then CH=""; fi
+    if [ -z "$CL" ]; then
+        echo "  Most it holds fully     : none - it spills even at num_ctx=$CH"
+    else
+        TCAP=0
+        [ "$TRAINED" -gt 0 ] 2>/dev/null && TCAP=$(( TRAINED / 4096 * 4096 ))
+        LOADS=0
+        say() {
+            case "$1" in
+                yes) echo "resident" ;;
+                no)  echo "spills" ;;
+                *)   echo "no reading - treated as a spill" ;;
+            esac
+        }
+        if [ -z "$CH" ] && { [ "$TCAP" -eq 0 ] || [ "$CL" -lt "$TCAP" ]; }; then
+            echo "finding the most it holds with no margin ..."
+            T=$CEIL_FROM
+            [ "$T" -lt $((CL + 16384)) ] && T=$((CL + 16384))
+            # Unbounded only with no trained maximum and a clamped slope:
+            # four times what fits is still a reach, not a crash.
+            [ "$TCAP" -eq 0 ] && [ "$T" -gt $((CL * 4)) ] && T=$((CL * 4))
+            UP=0
+            while [ -z "$CH" ] && [ $UP -lt 3 ] && [ $LOADS -lt 8 ]; do
+                [ "$TCAP" -gt 0 ] && [ "$T" -gt "$TCAP" ] && T=$TCAP
+                [ "$T" -le "$CL" ] && break
+                printf "  trying num_ctx=%s ... " "$T"
+                V=$(resident_at "$T"); note "$T" "$V"; say "$V"
+                LOADS=$((LOADS + 1)); UP=$((UP + 1))
+                T=$(( CL * 3 / 2 / 4096 * 4096 ))
+            done
+        elif [ -n "$CH" ] && [ $((CH - CL)) -gt 4096 ]; then
+            echo "finding the most it holds with no margin ..."
+        fi
+        while [ -n "$CH" ] && [ $((CH - CL)) -gt 4096 ] && [ $LOADS -lt 8 ]; do
+            MID=$(( (CL + CH) / 2 / 4096 * 4096 ))
+            [ "$MID" -le "$CL" ] && MID=$((CL + 4096))
+            [ "$MID" -ge "$CH" ] && break
+            printf "  trying num_ctx=%s ... " "$MID"
+            V=$(resident_at "$MID"); note "$MID" "$V"; say "$V"
+            LOADS=$((LOADS + 1))
+        done
+        unload
+        echo ""
+        if [ "$TCAP" -gt 0 ] && [ "$CL" -ge "$TCAP" ]; then
+            echo "  Most it holds fully     : $CL - its whole trained window"
+        else
+            echo "  Most it holds fully     : $CL - with NO headroom${CH:+; it spills at $CH}"
+            echo "  (anything else on this GPU - a second model, a browser, a game - can"
+            echo "   push it into system RAM. To use it anyway, run the curl above with"
+            echo "   num_ctx $CL, or type it into the box beside the model in Settings >"
+            echo "   Context sizing and press Bake.)"
+        fi
+    fi
 fi
 
 # --apply: do the bake ourselves. The number is parsed back out of the report

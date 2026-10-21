@@ -103,7 +103,35 @@ export interface MeasureResult {
    * the first guess was already good.
    */
   verified?: { largestResident: number; spilledAt: number | null; extrapolated: number };
+  /*
+   * The most the card actually holds, with no safety margin - found by
+   * loading, not projected. The recommendation stops 15% short of the card on
+   * purpose; this is the other end of the choice, so a person can spend some
+   * of that margin knowingly. Measured on a 24 GB 7900XTX it was 1.5x to 2x
+   * the recommendation for dense models, and it is the only number on offer
+   * for a model whose weights alone overrun the margin. Absent when nothing
+   * was loaded (skippedLoad) or the card took none of it (onCpu).
+   */
+  ceiling?: Ceiling;
+  /*
+   * True when /api/ps visibly under-states this model's memory: it spilled at
+   * a reported size well short of the card, or reported less than the model
+   * occupies on disk. Its GB figures are then not believable, though whether a
+   * load fit (size_vram against size) still is, so those are what to show.
+   */
+  sizesUnderReported?: boolean;
   vram: VramBudget;
+}
+
+export interface Ceiling {
+  /** Largest num_ctx, in 4k steps, that loaded entirely into VRAM; null if not even the smallest probe did. */
+  numCtx: number | null;
+  /** Its reported footprint, or null when sizesUnderReported makes it misleading. */
+  bytes: number | null;
+  /** Smallest num_ctx seen to spill; null if none did before the search stopped. */
+  spilledAt: number | null;
+  /** The ceiling is the trained maximum: memory was never what limited it. */
+  atTrainedMax: boolean;
 }
 
 /*
@@ -313,6 +341,75 @@ async function verifyResident(
   return { probes, largestResident: lo, spilledAt: hi };
 }
 
+/*
+ * The largest num_ctx the card takes whole, by loading - the margin-free end
+ * of the choice the recommendation makes for you.
+ *
+ * Starts from what is already known (every probe so far says resident or
+ * spilled at some num_ctx), so a model whose recommendation already spilled
+ * costs only the narrowing. With nothing spilled yet it first reaches up: to
+ * the no-margin projection, which is honest for a model whose reported size
+ * grows with context, then by halves again until something spills or the
+ * trained maximum is reached. Then it narrows to one 4k step - finer than the
+ * verify step's four, which stopped up to 12k short on gemma4:31b and laguna.
+ *
+ * The loader is a parameter so the search can be tested without a daemon.
+ */
+export async function findCeiling(
+  known: Probe[],
+  limits: { trainedMax: number | null; capacityBytes: number; baseBytes: number; bytesPerToken: number },
+  load: (numCtx: number) => Promise<Probe>,
+  maxLoads = 8,
+): Promise<{ ceiling: Ceiling; probes: Probe[] }> {
+  const probes: Probe[] = [];
+  let lo: number | null = null;
+  let hi: number | null = null;
+  const note = (p: Probe) => {
+    if (isResident(p)) lo = Math.max(lo ?? 0, p.numCtx);
+    else hi = Math.min(hi ?? Infinity, p.numCtx);
+  };
+  known.forEach(note);
+  // Residency should only fall as num_ctx rises; if a reading says otherwise,
+  // trust the resident one and search above it.
+  if (lo !== null && hi !== null && hi <= lo) hi = null;
+  const cap = limits.trainedMax ? Math.floor(limits.trainedMax / STEP) * STEP : null;
+  if (lo === null) {
+    return { ceiling: { numCtx: null, bytes: null, spilledAt: hi, atTrainedMax: false }, probes };
+  }
+  const take = async (numCtx: number) => {
+    const p = await load(numCtx);
+    probes.push(p);
+    note(p);
+  };
+
+  if (hi === null) {
+    const noMargin = limits.bytesPerToken > 0
+      ? Math.floor((limits.capacityBytes - limits.baseBytes) / limits.bytesPerToken / STEP) * STEP
+      : 0;
+    let target = Math.max(noMargin, lo + 4 * STEP);
+    // Unbounded only where nothing bounds it: no trained maximum and a slope
+    // clamped to one byte. Four times what fits is still a reach, not a crash.
+    if (cap === null) target = Math.min(target, lo * 4);
+    for (let up = 0; hi === null && up < 3 && probes.length < maxLoads; up++) {
+      if (cap !== null) target = Math.min(target, cap);
+      if (target <= lo) break;
+      await take(target);
+      target = Math.floor((lo * 1.5) / STEP) * STEP;
+    }
+  }
+  while (hi !== null && hi - lo > STEP && probes.length < maxLoads) {
+    let mid = Math.floor((lo + hi) / 2 / STEP) * STEP;
+    if (mid <= lo) mid = lo + STEP;
+    if (mid >= hi) break;
+    await take(mid);
+  }
+  const at = [...known, ...probes].filter((p) => p.numCtx === lo && isResident(p)).at(-1);
+  return {
+    ceiling: { numCtx: lo, bytes: at?.total ?? null, spilledAt: hi, atTrainedMax: cap !== null && lo >= cap },
+    probes,
+  };
+}
+
 export interface MeasureOptions {
   low?: number;
   high?: number;
@@ -437,6 +534,35 @@ export async function measureContext(
     if (v.spilledAt !== null) projection.cappedByTrained = false;
   }
 
+  // The margin-free end of the choice; see findCeiling. Measured against the
+  // whole card less what other models hold, the same capacity the pre-flight
+  // uses - the 15% belongs to the recommendation, not to this.
+  let ceiling: Ceiling | undefined;
+  if (!onCpu) {
+    const found = await findCeiling(probes, {
+      trainedMax: info?.contextLength ?? null,
+      capacityBytes,
+      baseBytes: projection.baseBytes,
+      bytesPerToken: projection.bytesPerToken,
+    }, (n) => probe(endpoint, model, n, opts.signal));
+    probes.push(...found.probes);
+    ceiling = found.ceiling;
+  }
+  /*
+   * Spilling at a reported size well short of the card, or reporting less
+   * than the weights occupy on disk, means /api/ps is not counting all of
+   * this model's memory - qwen3.8:27b filled a 24 GB card while reporting
+   * 16.4 GB, and gemma4:26b reported 1.2 GB for 17 GB of weights. Fit is
+   * still read correctly (it compares two reported figures with each other);
+   * the GB figure is what cannot be shown as if it were true.
+   */
+  // Not on the CPU: there every probe "spills" (size_vram 0) at any size,
+  // which says where the model runs, not that its sizes are wrong.
+  const sizesUnderReported = !onCpu && (
+    probes.some((p) => !isResident(p) && p.total < capacityBytes * 0.9)
+    || (onDisk !== null && probes.length > 0 && probes[0].total < onDisk * 0.9));
+  if (ceiling && sizesUnderReported) ceiling.bytes = null;
+
   await unload(endpoint, model);
 
   return {
@@ -448,6 +574,8 @@ export async function measureContext(
     vram,
     onCpu,
     verified,
+    ceiling,
+    sizesUnderReported,
     ...projection,
   };
 }

@@ -238,7 +238,11 @@ The same measurement runs in the app with no terminal: Settings, an Ollama endpo
 sizing**. Give the endpoint its card's size in **VRAM GB** first, because the app reaches the box
 over HTTP and cannot see the hardware. It aims 15% below the card - a 24 GB card is sized against
 20.4 GB - to leave room for a desktop, a browser, or a second model, and it confirms its answer by
-loading the model at it. Every model has a box beside it: measuring fills in the recommendation,
+loading the model at it. Then it keeps loading until the model spills, to report the most the card
+holds with **no** margin - on a 24 GB 7900XTX that was 1.5 to 2 times the recommendation for dense
+models, and the only number on offer for a model whose weights alone overrun the margin. Both are
+shown with a button each, so the choice of how much headroom to keep is yours, and both the script
+and the app report them. Every model has a box beside it: measuring fills in the recommendation,
 and you can type any `num_ctx` there instead - more of the card than the margin allows, or a fixed
 window for a model too big to measure at all, such as a 120B that runs mostly on the CPU - and
 **Bake** writes it into the model the way `--apply` does. It asks first only when the number is

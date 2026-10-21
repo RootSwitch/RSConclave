@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { project, psName } from '../measure.ts';
+import { findCeiling, project, psName } from '../measure.ts';
+import type { Probe } from '../measure.ts';
 
 /*
  * Two different units, deliberately kept apart.
@@ -137,4 +138,88 @@ test('measure: residency is judged from the probe, not the budget', () => {
   const at8k = { numCtx: 8192, total: 16.12 * B, vram: 16.12 * B };
   assert.ok(at176k.vram < at176k.total * 0.999, 'spilling probe must not read as resident');
   assert.ok(at8k.vram >= at8k.total * 0.999, 'fully-resident probe must read as resident');
+});
+
+/* ---------- findCeiling: the most the card holds, with no margin ---------- */
+
+/*
+ * A simulated model on a 24 GB card: honest reported sizes (base plus a cost
+ * per token), resident at or below a true ceiling and spilling above it, the
+ * way /api/ps reports a partial offload. Every load is counted.
+ */
+function model(opts: { base: number; perToken: number; trueCeiling: number; reportedGrowth?: boolean }) {
+  const loads: number[] = [];
+  const at = (numCtx: number): Probe => {
+    const total = opts.base + (opts.reportedGrowth === false ? 0 : opts.perToken * numCtx);
+    const fits = numCtx <= opts.trueCeiling;
+    return { numCtx, total, vram: fits ? total : total * 0.7 };
+  };
+  const load = async (numCtx: number) => { loads.push(numCtx); return at(numCtx); };
+  return { at, load, loads };
+}
+const card = 24 * GIB;
+
+test('ceiling: an honest model is found above its recommendation, to one 4k step', async () => {
+  // devstral-like on the 7900XTX: recommended 36864 with the margin, holds 57344.
+  const m = model({ base: 13.19 * GIB, perToken: 199 * 1024, trueCeiling: 57344 });
+  const known = [m.at(2048), m.at(8192), m.at(36864)];
+  const { ceiling, probes } = await findCeiling(known,
+    { trainedMax: 393216, capacityBytes: card, baseBytes: 13.19 * GIB, bytesPerToken: 199 * 1024 }, m.load);
+  assert.equal(ceiling.numCtx, 57344);
+  assert.equal(ceiling.spilledAt, 61440);
+  assert.equal(ceiling.atTrainedMax, false);
+  assert.equal(ceiling.bytes, m.at(57344).total, 'the footprint where it fits, for the GB figure');
+  assert.equal(probes.length, m.loads.length);
+  assert.ok(m.loads.length <= 6, `${m.loads.length} loads: ${m.loads}`);
+});
+
+test('ceiling: after a verify that spilled, only the narrowing is paid for', async () => {
+  // gemma4:31b-like: sizes do not grow, so the arithmetic over-promised and the
+  // verify step walked down coarsely (36864 resident, 53248 spilled).
+  const m = model({ base: 18.87 * GIB, perToken: 0, trueCeiling: 45056, reportedGrowth: false });
+  const known = [m.at(2048), m.at(8192), m.at(262144), m.at(135168), m.at(69632), m.at(36864), m.at(53248)];
+  const { ceiling } = await findCeiling(known,
+    { trainedMax: 262144, capacityBytes: card, baseBytes: 18.87 * GIB, bytesPerToken: 1 }, m.load);
+  assert.equal(ceiling.numCtx, 45056);
+  assert.equal(ceiling.spilledAt, 49152);
+  assert.ok(m.loads.every((n) => n > 36864 && n < 53248), `only between the known pair: ${m.loads}`);
+});
+
+test('ceiling: a model past the margin, which gets no recommendation, still gets this', async () => {
+  // qwen3.5:35b-a3b on the 7900XTX: weights 21.1 GB, over the 20.4 budget, holds 49152.
+  const m = model({ base: 21.08 * GIB, perToken: 21 * 1024, trueCeiling: 49152 });
+  const { ceiling } = await findCeiling([m.at(2048), m.at(8192)],
+    { trainedMax: 262144, capacityBytes: card, baseBytes: 21.08 * GIB, bytesPerToken: 21 * 1024 }, m.load);
+  assert.equal(ceiling.numCtx, 49152);
+  assert.equal(ceiling.spilledAt, 53248);
+});
+
+test('ceiling: the trained maximum already resident costs no loads', async () => {
+  const m = model({ base: 11.82 * GIB, perToken: 19 * 1024, trueCeiling: 10_000_000 });
+  const { ceiling, probes } = await findCeiling([m.at(2048), m.at(8192), m.at(131072)],
+    { trainedMax: 131072, capacityBytes: card, baseBytes: 11.82 * GIB, bytesPerToken: 19 * 1024 }, m.load);
+  assert.equal(ceiling.numCtx, 131072);
+  assert.equal(ceiling.atTrainedMax, true);
+  assert.equal(ceiling.spilledAt, null);
+  assert.equal(probes.length, 0);
+});
+
+test('ceiling: a model that spills even at the smallest probe has none, and loads nothing more', async () => {
+  const m = model({ base: 23.9 * GIB, perToken: 3 * 1024, trueCeiling: 0 });
+  const { ceiling, probes } = await findCeiling([m.at(2048), m.at(8192)],
+    { trainedMax: 1048576, capacityBytes: card, baseBytes: 23.9 * GIB, bytesPerToken: 3 * 1024 }, m.load);
+  assert.equal(ceiling.numCtx, null);
+  assert.equal(ceiling.spilledAt, 2048);
+  assert.equal(probes.length, 0);
+});
+
+test('ceiling: an under-promising projection reaches up by halves, within the load budget', async () => {
+  // Reported sizes do not grow and there is no trained maximum: the projection
+  // says almost nothing, so the reach is bounded rather than astronomical.
+  const m = model({ base: 18 * GIB, perToken: 0, trueCeiling: 90112, reportedGrowth: false });
+  const { ceiling } = await findCeiling([m.at(2048), m.at(8192)],
+    { trainedMax: null, capacityBytes: card, baseBytes: 18 * GIB, bytesPerToken: 1 }, m.load, 8);
+  assert.ok(m.loads.length <= 8, `${m.loads.length} loads`);
+  assert.ok(Math.max(...m.loads) <= 8192 * 4 * 1.5 ** 2 + 4096, `never far past what was proven: ${m.loads}`);
+  assert.ok(ceiling.numCtx !== null && ceiling.numCtx >= 32768, `found at least ${ceiling.numCtx}`);
 });

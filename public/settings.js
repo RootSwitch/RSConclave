@@ -308,8 +308,9 @@ const Settings = {
             ctxWrap.replaceChildren(...[
               el('div', { class: 'row' },
                 el('span', { class: 'muted', style: 'flex: 1' },
-                  'Loads each model twice to find its real cost per token, then loads once more at its own '
-                  + 'answer to check the card really takes it. Allow a minute or two per model. '
+                  'Loads each model twice to find its real cost per token, once more to check the card really '
+                  + 'takes its recommendation, then a few times more to find the most it holds with no margin. '
+                  + 'Allow two to four minutes per model. '
                   + 'Measuring fills in each model\'s box; you can type any num_ctx there instead, measured '
                   + 'or not. Nothing is written unless you press Bake.'),
                 allBtn, progress),
@@ -451,7 +452,10 @@ const Settings = {
    * cannot disagree.
    */
   ctxRow(endpointId, model) {
-    const out = el('span', { class: 'muted' });
+    // Wraps whatever class it wears. Some results borrow .fit-tag for its
+    // colour, and .fit-tag is a short label that never wraps - a sentence
+    // in it ran off the side of the panel and gave it a scrollbar.
+    const out = el('span', { class: 'muted', style: 'white-space: normal' });
     const actions = el('span', { class: 'row' });
     const btn = el('button', { class: 'mini' }, 'Measure');
     let last = null; // the latest measurement, read by the bake warnings
@@ -467,6 +471,8 @@ const Settings = {
      */
     const ctxBox = ctxInput();
     ctxBox.min = '2048';
+    // Wide enough for 1048576 beside the spinner: a baked 188416 read "18841".
+    ctxBox.style.width = '100px';
     ctxBox.placeholder = 'num_ctx';
     ctxBox.title = 'The context window to bake into this model on the box. Measure fills in its recommendation; '
       + 'any whole number from 2048 works, including for models too big to measure.';
@@ -495,7 +501,9 @@ const Settings = {
         return;
       }
       const trained = last?.trainedMax ?? App.modelInfo(endpointId, model)?.contextLength ?? null;
-      const spilledAt = last?.verified?.spilledAt ?? null;
+      // The ceiling search narrows to one 4k step, so its spill point is the
+      // exact one; the verify step's is only where its coarse walk stopped.
+      const spilledAt = last?.ceiling?.spilledAt ?? last?.verified?.spilledAt ?? null;
       const warnings = [];
       if (trained && n > trained) {
         warnings.push(`${n} is past the ${trained} tokens this model was trained for. Ollama will accept it, `
@@ -555,10 +563,31 @@ const Settings = {
         last = r;
         actions.replaceChildren();
         const perK = (r.bytesPerToken * 1024) / 1048576;
-        const parts = [
-          `${GB(r.baseBytes)} GB of weights`,
-          `${perK.toFixed(1)} MB per 1k tokens`,
-        ];
+        /*
+         * A model /api/ps under-reports gets no GB figures at all: "0.9 GB of
+         * weights" for a 17 GB model, or "0.0 MB per 1k tokens" for one that
+         * filled the card, would be the confident wrong number this panel
+         * exists not to give. Fit is still known - it was checked by loading.
+         */
+        const parts = r.sizesUnderReported
+          ? ['Ollama under-reports this model\'s memory, so no GB figures are shown; every fit below was checked by loading it']
+          : [`${GB(r.baseBytes)} GB of weights`, `${perK.toFixed(1)} MB per 1k tokens`];
+        /*
+         * The margin-free end of the choice. The recommendation stops 15%
+         * short of the card on purpose; the ceiling is the most it took whole
+         * when loaded, so a person can spend that margin knowingly. Neither is
+         * baked by these buttons - they fill the box, and Bake writes.
+         */
+        const c = r.ceiling;
+        const useBtn = (n, label) => el('button', { class: 'mini', title: `Put ${n} in the box. Bake writes it.`,
+          onclick: () => { ctxBox.value = String(n); ctxBox.focus(); } }, label);
+        const ceilingSentence = (rec) => {
+          if (!c || c.numCtx === null) return '';
+          if (c.atTrainedMax) return rec === c.numCtx ? '' : ` It holds its whole trained window, ${c.numCtx}, on the card.`;
+          if (rec && c.numCtx <= rec) return ' That is also the most it holds fully on the card.';
+          return ` The most it holds fully on the card is ${c.numCtx} (${fmtK(c.numCtx)})${c.bytes ? `, at ${GB(c.bytes)} GB` : ''}`
+            + ' - with no headroom, so a second model, a browser or a game on this GPU can push it into system RAM.';
+        };
         if (r.onCpu) {
           // Nothing to size: the card took none of it. Reporting a window from
           // a stated VRAM figure would describe hardware not in play.
@@ -573,7 +602,9 @@ const Settings = {
           // It IS on the card; it just leaves no headroom. Telling someone this
           // runs in system RAM would send them shopping for a card they own.
           out.className = 'fit-tag raise';
-          out.textContent = `${parts.join(', ')} - fits the card, but past the ${GB(r.budgetBytes)} GB safety budget. Usable with nothing spare: one more model, or a busy desktop, and it spills.`;
+          out.textContent = `${parts.join(', ')} - fits the card, but past the ${GB(r.budgetBytes)} GB safety budget, so there is no recommendation.`
+            + (c?.numCtx ? ceilingSentence(null) : ' Usable with nothing spare: one more model, or a busy desktop, and it spills.');
+          if (c?.numCtx) actions.append(useBtn(c.numCtx, `use ${fmtK(c.numCtx)}`));
         } else if (r.notFitting) {
           out.className = 'error-text';
           out.textContent = `${parts.join(', ')} - the weights alone exceed the budget, and the probe confirms only part of it reached the card. It runs with layers in system RAM.`;
@@ -589,8 +620,12 @@ const Settings = {
               ? `capped at the trained maximum (VRAM alone would allow about ${fmtK(Math.floor(r.uncappedMax))})`
               : `sized against ${GB(r.budgetBytes)} GB of budget`;
           out.textContent = `${parts.join(', ')} - recommends num_ctx ${r.recommended} (${fmtK(r.recommended)}), ${why}.`;
+          out.textContent += ceilingSentence(r.recommended);
           if (r.vram.otherModels.length) {
             out.textContent += ` Held by ${r.vram.otherModels.join(', ')}: ${GB(r.vram.heldByOthersBytes)} GB.`;
+          }
+          if (c?.numCtx && c.numCtx > r.recommended) {
+            actions.append(useBtn(r.recommended, `use ${fmtK(r.recommended)}`), useBtn(c.numCtx, `use ${fmtK(c.numCtx)}`));
           }
           // The recommendation goes into the bake box rather than onto a
           // button of its own: one control bakes whatever number is in it,
