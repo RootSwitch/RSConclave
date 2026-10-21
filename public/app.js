@@ -527,8 +527,8 @@ function endpointOf(endpointId) {
   return App.config.endpoints.find((e) => e.id === endpointId);
 }
 
-/** Build a GenParams object from optional temp/ctx/max-out values; undefined if all blank. */
-function genParams(tempValue, ctxValue, maxTokensValue) {
+/** Build a GenParams object from optional temp/ctx/max-out/reasoning values; undefined if all blank. */
+function genParams(tempValue, ctxValue, maxTokensValue, reasoning) {
   const p = {};
   const t = parseFloat(tempValue);
   if (Number.isFinite(t)) p.temperature = t;
@@ -536,8 +536,83 @@ function genParams(tempValue, ctxValue, maxTokensValue) {
   if (Number.isFinite(c) && c > 0) p.num_ctx = c;
   const m = parseInt(maxTokensValue, 10);
   if (Number.isFinite(m) && m > 0) p.maxTokens = m;
+  if (['off', 'on', 'low', 'medium', 'high'].includes(reasoning)) p.reasoning = reasoning;
   return Object.keys(p).length ? p : undefined;
 }
+
+/*
+ * How hard a seat's model reasons. Blank is the model's own default - what
+ * every seat did before this existed - so nothing is sent unless chosen.
+ *
+ * The choices follow the model, read from /api/show, because what a model
+ * does with a setting is the model's business and pretending otherwise is the
+ * failure this avoids. Measured on a 3090 with one question: gpt-oss:20b spent
+ * 110 reasoning tokens at low and 1,729 at high; the unsloth Qwen3.8-27B 196
+ * and 308; qwen3.6:27b gave byte-identical answers at low and high, because its
+ * template only switches thinking on and off. So levels are offered where the
+ * template takes them (ModelInfo.thinkLevels), off/on where the model thinks
+ * but takes no level, and nothing where it does not think at all. "Off" is
+ * dropped for a model that reasons regardless (ModelInfo.thinkAlways): gpt-oss
+ * wrote the same reasoning with thinking off as on. Ollama endpoints only: an
+ * openai-compat server has no /api/show to ask.
+ *
+ * source() returns [endpointId, pickerValue]; a profile resolves to its real
+ * model. `watch` are the pickers whose changes should re-read the model. The
+ * chosen value is kept in dataset.want, so moving a seat to a model without
+ * reasoning and back again does not lose it.
+ */
+const REASONING_CHOICES = {
+  levels: [['', 'reasoning: default'], ['off', 'reasoning: off'], ['low', 'reasoning: low'],
+    ['medium', 'reasoning: medium'], ['high', 'reasoning: high']],
+  onOff: [['', 'reasoning: default'], ['off', 'reasoning: off'], ['on', 'reasoning: on']],
+};
+
+function reasoningInput(source, value, ...watch) {
+  const sel = el('select', { class: 'reasoning-select', 'aria-label': 'Reasoning',
+    title: 'How hard this model reasons before answering. Default leaves it to the model. '
+      + 'Levels appear only for models whose template takes them; others only switch on and off.' });
+  sel.dataset.want = value ?? '';
+  sel.addEventListener('change', () => { sel.dataset.want = sel.value; });
+  sel._sync = () => {
+    const [endpointId, pickerValue] = source();
+    const real = profileFor(endpointId, pickerValue)?.model ?? pickerValue;
+    const info = endpointOf(endpointId)?.kind === 'ollama' && real ? App.modelInfo(endpointId, real) : null;
+    const want = sel.dataset.want ?? '';
+    if (!info?.capabilities?.includes('thinking')) {
+      // Hidden by visibility, not display, so a grid row keeps its columns.
+      sel.replaceChildren(el('option', { value: '' }, 'reasoning: default'));
+      sel.disabled = true;
+      sel.style.visibility = 'hidden';
+      return;
+    }
+    let opts = info.thinkLevels ? REASONING_CHOICES.levels : REASONING_CHOICES.onOff;
+    if (info.thinkAlways) opts = opts.filter(([v]) => v !== 'off');
+    sel.replaceChildren(...opts.map(([v, label]) => el('option', { value: v }, label)));
+    sel.value = opts.some(([v]) => v === want) ? want : '';
+    sel.disabled = false;
+    sel.style.visibility = '';
+  };
+  for (const w of watch) w?.addEventListener('change', () => sel._sync());
+  sel._sync();
+  return sel;
+}
+
+/** A seat's reasoning choice, or '' when its model offers none. */
+function reasoningValue(sel) {
+  return sel && !sel.disabled ? sel.value : '';
+}
+
+/** Put a stored choice back into a box, after its seat's model is set. */
+function setReasoning(sel, value) {
+  if (!sel) return;
+  sel.dataset.want = value ?? '';
+  sel._sync();
+}
+
+// Model details land after the rows are drawn; every reasoning box re-reads.
+document.addEventListener('model-info-loaded', () => {
+  for (const sel of document.querySelectorAll('select.reasoning-select')) sel._sync?.();
+});
 
 /*
  * A ceiling on how much this seat may generate. Every provider honours it -

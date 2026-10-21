@@ -130,3 +130,37 @@ test('thinkNormalizer: empty deltas open nothing', async () => {
   n.finish();
   assert.equal(out, 'answer');
 });
+
+/* ---------- reasoning: levels where the template takes them, think on the wire ---------- */
+
+test('parseModelInfo: a template that takes a reasoning level is told apart from one that does not', async () => {
+  const { parseModelInfo } = await import('../providers.ts');
+  // Excerpts of the real templates on a 3090: gpt-oss writes the level into
+  // its system message; the unsloth Qwen3.8 template reads reasoning_effort;
+  // qwen3.6:27b's only switches thinking on and off.
+  const gptOss = '{{- if and .IsThinkSet .Think (ne .ThinkLevel "") }}\nReasoning: {{ .ThinkLevel }}\n{{- end }}';
+  const qwen38 = "{%- set resolved_reasoning_effort = reasoning_effort|default('xhigh') %}";
+  const qwen36 = '{{- if .Think }}<think>\n{{ .Thinking }}\n</think>{{ end }}';
+  assert.equal(parseModelInfo({ template: gptOss, capabilities: ['thinking'] }).thinkLevels, true);
+  assert.equal(parseModelInfo({ template: qwen38, capabilities: ['thinking'] }).thinkLevels, true);
+  assert.equal(parseModelInfo({ template: qwen36, capabilities: ['thinking'] }).thinkLevels, false);
+  assert.equal(parseModelInfo({}).thinkLevels, false, 'no template, no levels');
+  // gpt-oss reasons with think:false too, so it is never offered "off".
+  assert.equal(parseModelInfo({ details: { family: 'gptoss' }, template: gptOss }).thinkAlways, true);
+  assert.equal(parseModelInfo({ details: { family: 'qwen35' }, template: qwen38 }).thinkAlways, false);
+  assert.equal(parseModelInfo({}).thinkAlways, false);
+});
+
+test('thinkParam: the seat choice becomes Ollama\'s think field, or is left out', async () => {
+  const { thinkParam } = await import('../providers.ts');
+  assert.equal(thinkParam('off'), false);
+  assert.equal(thinkParam('on'), true);
+  assert.equal(thinkParam('low'), 'low');
+  assert.equal(thinkParam('medium'), 'medium');
+  assert.equal(thinkParam('high'), 'high');
+  // Absent means the model's own default, as every seat had before this.
+  assert.equal(thinkParam(undefined), undefined);
+  // A stored value from an edited config is dropped, never sent as-is.
+  assert.equal(thinkParam('xhigh'), undefined);
+  assert.equal(thinkParam(true), undefined);
+});

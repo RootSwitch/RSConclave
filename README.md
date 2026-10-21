@@ -275,6 +275,27 @@ number, and the dropped history is replaced by an explicit moderator note rather
 Councils have no such curve - each member is sent your prompt alone, never the other members'
 answers, so nothing compounds.
 
+## Reasoning
+
+Every seat - a chat, each council member and the consolidator, each roundtable participant and
+pipeline stage - has a **reasoning** box after max out, for models that think before they
+answer. **Default** sends nothing and leaves it to the model, which is what every seat did
+before the box existed. The choices follow the model, read from Ollama's `/api/show`, because
+a setting the model quietly ignores is worse than no setting:
+
+| the model | offered | measured on one question, on a 3090 |
+|---|---|---|
+| its template takes a level (gpt-oss, the unsloth Qwen3.8 GGUF) | off, low, medium, high | gpt-oss:20b spent 110 reasoning tokens at low, 1,729 at high |
+| it thinks, but only on or off (qwen3.6, deepseek-r1) | off, on | qwen3.6:27b gave byte-identical answers at low and high |
+| it does not think | nothing - the box is hidden | |
+
+gpt-oss is offered no **off**: it reasons whatever it is told, and Ollama ignores the switch for
+it. For the rest, off is the fast end and can be the wrong one - with thinking off, qwen3.6 got
+the test sum wrong. The choice is saved with presets and carried into clones and fork to chat.
+
+Ollama endpoints only. An OpenAI-compatible server has no `/api/show` to ask, so its seats show
+no box and send nothing.
+
 ## Run and host
 
 **RSConclave is its own web server.** There is no separate hosting step - no nginx, no IIS, no

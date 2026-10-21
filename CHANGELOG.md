@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+**A reasoning box on every seat.** Some models will think harder or less hard
+on request, and whether they will is a property of the model, not the app:
+gpt-oss:20b spent 110 reasoning tokens on one question at low and 1,729 at
+high, the unsloth Qwen3.8 GGUF 196 and 308, while qwen3.6:27b gave
+byte-identical answers at low and high because its template only switches
+thinking on and off. So every seat - chat, council members and the
+consolidator, roundtable participants, pipeline stages - gets a box after max
+out whose choices come from the model's own `/api/show`: off, low, medium and
+high where the template takes a level, off and on where the model thinks but
+takes no level, and no box at all where it does not think. gpt-oss is offered
+no off, because it reasons whatever it is told - with thinking off, Ollama
+0.32.9 returned the same 118 characters of reasoning as with it on. Default
+sends nothing, which is what every seat did before, so existing presets and
+sessions behave exactly as they did. The choice is saved with presets and
+carried into clones and fork to chat. Ollama endpoints only: an
+OpenAI-compatible server has nothing to ask, and its seats show no box.
+
+Roundtable and pipeline rows also stop running past their border on a long
+model name. A 75-character hf.co name made its picker 518px wide, which pushed
+the row's last controls out past the edge; cells may now shrink, and the name
+clips inside its own picker.
+
 **A document library, so the same file stops being re-pulled into every
 conversation.** Testing the memory persona meant pasting the same DIGEST.md
 into chat after chat - the friction was never attaching it, it was going to

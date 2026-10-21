@@ -137,6 +137,8 @@ const Pipeline = {
         preset?.template ?? ''),
     };
     if (preset?.params?.temperature !== undefined) els.temp.value = preset.params.temperature;
+    els.reasoning = reasoningInput(() => [els.endpoint.value, els.model.value], preset?.params?.reasoning,
+      els.endpoint, els.model);
 
     for (const ep of liveEndpoints()) els.endpoint.append(el('option', { value: ep.id }, ep.name));
     ollamaOnly(els.ctx, els.endpoint)(); // options exist now, so the kind is readable
@@ -152,6 +154,7 @@ const Pipeline = {
       } catch {
         els.model.replaceChildren(el('option', {}, 'error'));
       }
+      els.reasoning._sync();
     };
     if (App.config.endpoints.length) fillModels();
     els.endpoint.onchange = fillModels;
@@ -162,7 +165,7 @@ const Pipeline = {
     } }, '✕');
 
     const row = el('div', { class: 'stage-row' },
-      els.name, els.endpoint, els.model, els.temp, els.ctx, els.maxOut, removeBtn, els.template);
+      els.name, els.endpoint, els.model, els.temp, els.ctx, els.maxOut, els.reasoning, removeBtn, els.template);
     rowsWrap.append(row);
     this.stages.push({ id, els });
     return row;
@@ -176,7 +179,7 @@ const Pipeline = {
         name: s.els.name.value.trim() || undefined,
         endpointId: s.els.endpoint.value,
         ...seatFrom(s.els.endpoint.value, s.els.model.value,
-          genParams(s.els.temp.value, s.els.ctx.value, s.els.maxOut.value)),
+          genParams(s.els.temp.value, s.els.ctx.value, s.els.maxOut.value, reasoningValue(s.els.reasoning))),
         template: s.els.template.value,
       });
     }

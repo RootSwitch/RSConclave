@@ -155,6 +155,7 @@ const Council = {
     consolidateEl.checked = true;
     const consolidatorCtxEl = ctxInput();
     const consolidatorMaxOutEl = maxTokensInput();
+    const consolidatorReasoningEl = reasoningInput(() => (consolidatorSel.value || '|').split('|'), '', consolidatorSel);
     const syncConsolidatorCtx = ollamaOnly(consolidatorCtxEl, consolidatorSel, (s) => (s.value || '|').split('|')[0]);
     const errEl = el('div', { class: 'error-text' });
 
@@ -175,7 +176,7 @@ const Council = {
     }, 'Fit this prompt');
 
     this.form = { promptEl, consolidatorSel, templateEl, unloadEl, ballotEl, consolidateEl, consolidatorCtxEl,
-      consolidatorMaxOutEl, syncConsolidatorCtx, errEl, memberRows: [], modelListEl,
+      consolidatorMaxOutEl, consolidatorReasoningEl, syncConsolidatorCtx, errEl, memberRows: [], modelListEl,
       promptSizeEl, fitSummaryEl, consolidatorFitEl, fitBtn, docState };
 
     // Cheap enough to run on every keystroke: the estimate is a length read,
@@ -201,6 +202,7 @@ const Council = {
       consolidatorSel,
       consolidatorCtxEl,
       consolidatorMaxOutEl,
+      consolidatorReasoningEl,
       consolidatorFitEl,
       el('span', { class: 'muted', title: 'The consolidator reads every response at once - it usually needs the biggest window of all.' }, '⟵ give it room'),
     );
@@ -275,6 +277,9 @@ const Council = {
     const ctx = ctxInput(opts.numCtx ?? profile?.params?.num_ctx);
     ollamaOnly(ctx, endpointId); // fixed endpoint for this row, so no re-sync needed
     const maxOut = maxTokensInput(opts.maxTokens);
+    // This row's model never changes, so the box reads it once (and again when
+    // the box's model details arrive).
+    const reasoning = reasoningInput(() => [endpointId, model], opts.reasoning);
     /*
      * A council member is normally sent the bare prompt, which is what makes
      * the answers comparable. A persona is the deliberate exception, and it is
@@ -290,7 +295,7 @@ const Council = {
     // Every row carries its own fit tag, clones included: a clone shares the
     // model but has its own ctx box, so it can be sized differently.
     const fitEl = el('span', { class: 'fit-tag' });
-    const row = { endpointId, model, realModel, cb, personaInput: persona, tempInput: temp, ctxInput: ctx, maxOutInput: maxOut, fitEl, isClone: !!opts.isClone };
+    const row = { endpointId, model, realModel, cb, personaInput: persona, tempInput: temp, ctxInput: ctx, maxOutInput: maxOut, reasoningInput: reasoning, fitEl, isClone: !!opts.isClone };
     persona.addEventListener('change', () => this.refreshFit());
     // Typing a bigger window must clear the warning it caused, or the fix
     // looks like it did nothing until the next render.
@@ -323,7 +328,7 @@ const Council = {
       opts.isClone ? null : ctxTag(endpointId, realModel, profile?.params?.num_ctx),
       fitEl,
       el('span', { class: 'grow' }),
-      persona, temp, ctx, maxOut, ...controls);
+      persona, temp, ctx, maxOut, reasoning, ...controls);
     this.form.memberRows.push(row);
     return row;
   },
@@ -502,7 +507,7 @@ const Council = {
       members.push({
         endpointId: row.endpointId,
         ...seatFrom(row.endpointId, row.model,
-          genParams(row.tempInput.value, row.ctxInput.value, row.maxOutInput.value)),
+          genParams(row.tempInput.value, row.ctxInput.value, row.maxOutInput.value, reasoningValue(row.reasoningInput))),
         personaId: row.personaInput.value || undefined,
       });
     }
@@ -515,7 +520,7 @@ const Council = {
         // The value carries endpoint|model, and model may be a profile. Profile
         // ids never contain '|', so the split above is unaffected.
         ...seatFrom(cEndpoint, cModel,
-          genParams(undefined, f.consolidatorCtxEl.value, f.consolidatorMaxOutEl.value)),
+          genParams(undefined, f.consolidatorCtxEl.value, f.consolidatorMaxOutEl.value, reasoningValue(f.consolidatorReasoningEl))),
         template: f.templateEl.value,
       },
       documentIds: f.docState.ids.length ? f.docState.ids : undefined,
@@ -549,6 +554,7 @@ const Council = {
         row.personaInput.value = '';
         row.tempInput.value = '';
         row.ctxInput.value = '';
+        setReasoning(row.reasoningInput, '');
       }
     }
     for (const m of config.members) {
@@ -558,6 +564,7 @@ const Council = {
         base.personaInput.value = m.personaId ?? '';
         if (m.params?.temperature !== undefined) base.tempInput.value = m.params.temperature;
         if (m.params?.num_ctx !== undefined) base.ctxInput.value = m.params.num_ctx;
+        setReasoning(base.reasoningInput, m.params?.reasoning);
       } else {
         const anchor = f.memberRows.find((r) => r.endpointId === m.endpointId && r.model === m.model && !r.isClone);
         if (!anchor) continue; // model no longer on the box
@@ -566,6 +573,7 @@ const Council = {
           personaId: m.personaId,
           temp: m.params?.temperature,
           numCtx: m.params?.num_ctx,
+          reasoning: m.params?.reasoning,
         });
         anchor.rowEl.after(clone.rowEl);
         const at = f.memberRows.indexOf(anchor) + 1;
@@ -576,6 +584,7 @@ const Council = {
     if ([...f.consolidatorSel.options].some((o) => o.value === cKey)) f.consolidatorSel.value = cKey;
     if (config.consolidator.template) f.templateEl.value = config.consolidator.template;
     f.consolidatorCtxEl.value = config.consolidator.params?.num_ctx ?? '';
+    setReasoning(f.consolidatorReasoningEl, config.consolidator.params?.reasoning);
     f.unloadEl.checked = !!config.unloadBetweenModels;
     f.ballotEl.value = (config.ballot ?? []).join(', ');
     f.docState.ids = (config.documentIds ?? []).filter((id) => App.documents.some((d) => d.id === id));

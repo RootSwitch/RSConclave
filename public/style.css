@@ -496,11 +496,18 @@ details[open] summary { margin-bottom: 9px; }
    and hangs out past the border, while the button itself wraps to a line of
    its own. That is what "max out" did after it was added and the templates
    were not grown to match.
-   participant: colour name endpoint model persona temp ctx maxOut remove
-   stage:            name endpoint model      temp ctx maxOut remove */
-.participant-row { grid-template-columns: 32px 110px 1fr 1fr 1fr 62px 72px 72px 30px; }
-.stage-row { grid-template-columns: 140px 1fr 1fr 62px 72px 72px 30px; }
+   participant: colour name endpoint model persona temp ctx maxOut reasoning remove
+   stage:            name endpoint model      temp ctx maxOut reasoning remove */
+/* The reasoning column sits after max out. Its box is hidden by visibility,
+   not display, for a model without reasoning, so the column stays put and the
+   remove button never slides into it. */
+.participant-row { grid-template-columns: 32px 110px 1fr 1fr 1fr 62px 72px 72px 140px 30px; }
+.stage-row { grid-template-columns: 140px 1fr 1fr 62px 72px 72px 140px 30px; }
 .participant-row textarea, .stage-row textarea { grid-column: 1 / -1; min-height: 32px; }
+/* Cells may shrink below their content. A model picker is otherwise as wide as
+   its longest option - 75 characters for an hf.co name, 518px - and the row
+   ran far past its column. Now a long name clips inside its own picker. */
+.participant-row > *, .stage-row > * { min-width: 0; }
 /* Full width, or the seat's fit warning is dealt the 32px colour column and
    its message runs off the side of the row. */
 .participant-row .fit-tag { grid-column: 1 / -1; }
@@ -826,3 +833,5 @@ details.think .think-body {
 .rate-spark-wrap { color: var(--se-txt-dim); }
 .rate-spark { display: block; overflow: visible; }
 .rate-spark-wrap:has(.degraded) { color: var(--se-warn); }
+/* Wide enough for "reasoning: medium" in the flex rows too (chat, council). */
+select.reasoning-select { min-width: 140px; }

@@ -295,6 +295,9 @@ const Roundtable = {
     if (preset?.personaId) els.persona.value = preset.personaId;
     if (preset?.overlayPrompt) els.overlay.value = preset.overlayPrompt;
     if (preset?.params?.temperature !== undefined) els.temp.value = preset.params.temperature;
+    // Follows this seat's pickers; a human seat has no model and hides it.
+    els.reasoning = reasoningInput(() => [els.endpoint.value, els.model.value], preset?.params?.reasoning,
+      els.endpoint, els.model);
 
     for (const ep of liveEndpoints()) {
       els.endpoint.append(el('option', { value: ep.id }, ep.name));
@@ -314,6 +317,7 @@ const Roundtable = {
       els.maxOut.disabled = human;
       if (human) {
         els.model.replaceChildren(el('option', {}, ' - '));
+        els.reasoning._sync();
         return;
       }
       els.model.replaceChildren(el('option', {}, 'loading…'));
@@ -326,6 +330,7 @@ const Roundtable = {
       } catch (err) {
         els.model.replaceChildren(el('option', {}, 'error'));
       }
+      els.reasoning._sync();
     };
     if (App.config.endpoints.length) fillModels();
     els.endpoint.onchange = fillModels;
@@ -348,7 +353,7 @@ const Roundtable = {
     for (const node of [els.endpoint, els.model, els.persona]) node.addEventListener('change', () => this.refreshFit());
 
     const row = el('div', { class: 'participant-row' },
-      els.color, els.name, els.endpoint, els.model, els.persona, els.temp, els.ctx, els.maxOut, removeBtn, els.overlay, els.fit);
+      els.color, els.name, els.endpoint, els.model, els.persona, els.temp, els.ctx, els.maxOut, els.reasoning, removeBtn, els.overlay, els.fit);
     rowsWrap.append(row);
     this.parts.push({ id, els });
     this.refreshFit();
@@ -423,7 +428,7 @@ const Roundtable = {
         // profile the same way every other mode does.
         ...(human ? { model: '', params: undefined }
           : seatFrom(p.els.endpoint.value, p.els.model.value,
-              genParams(p.els.temp.value, p.els.ctx.value, p.els.maxOut.value))),
+              genParams(p.els.temp.value, p.els.ctx.value, p.els.maxOut.value, reasoningValue(p.els.reasoning)))),
         personaId: (!human && p.els.persona.value) || undefined,
         overlayPrompt: (!human && p.els.overlay.value.trim()) || undefined,
         color: p.els.color.value,

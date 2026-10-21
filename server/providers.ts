@@ -48,6 +48,24 @@ export interface ModelInfo {
   parameterSize: string | null; // "33.4B"
   capabilities: string[];       // completion, tools, vision, thinking
   /*
+   * The model's template takes a reasoning LEVEL, not just on and off. Read
+   * from the template itself, because that is where a level either becomes
+   * something or is dropped: gpt-oss writes "Reasoning: {{ .ThinkLevel }}"
+   * into its system message, and Qwen3.8's template turns reasoning_effort
+   * into an instruction. A template mentioning neither ignores a level, so
+   * the app does not offer one.
+   */
+  thinkLevels: boolean;
+  /*
+   * The model reasons whatever it is told, so "off" is not offered. gpt-oss
+   * answers in a format with its own reasoning channel, and Ollama ignores
+   * think:false for it - measured on Ollama 0.32.9, gpt-oss:20b wrote the same
+   * 118 characters of reasoning with think:false as with think:true, where
+   * the unsloth Qwen3.8 wrote none. Known by family, not template: nothing in
+   * the template says the channel cannot be closed.
+   */
+  thinkAlways: boolean;
+  /*
    * Parameters the MODELFILE sets, not the effective values. An unset
    * temperature is absent here and Ollama's own default applies - so "no
    * temperature" means default, never zero. Reporting a guess would be worse
@@ -92,8 +110,28 @@ export function parseModelInfo(data: any): ModelInfo {
     quantization: typeof det.quantization_level === 'string' ? det.quantization_level : null,
     parameterSize: typeof det.parameter_size === 'string' ? det.parameter_size : null,
     capabilities: Array.isArray(data?.capabilities) ? data.capabilities.map(String) : [],
+    thinkLevels: typeof data?.template === 'string' && /\bThinkLevel\b|\breasoning_effort\b/.test(data.template),
+    thinkAlways: det.family === 'gptoss',
     params,
   };
+}
+
+/**
+ * The seat's reasoning choice as Ollama's `think` field: false, true, or a
+ * level string. undefined means leave the field out, so the model's own
+ * default applies. Anything unrecognised is also left out rather than sent -
+ * a stored value from an older or edited config must not become an error.
+ */
+export function thinkParam(reasoning: unknown): boolean | 'low' | 'medium' | 'high' | undefined {
+  switch (reasoning) {
+    case 'off': return false;
+    case 'on': return true;
+    case 'low':
+    case 'medium':
+    case 'high':
+      return reasoning;
+    default: return undefined;
+  }
 }
 
 /*
@@ -290,6 +328,8 @@ async function streamOllama(args: StreamChatArgs): Promise<StreamResult> {
   };
   const keepAlive = args.params?.keep_alive ?? args.endpoint.defaultKeepAlive;
   if (keepAlive !== undefined) body.keep_alive = keepAlive;
+  const think = thinkParam(args.params?.reasoning);
+  if (think !== undefined) body.think = think;
 
   const started = Date.now();
   const res = await doPost(`${base}/api/chat`, body, args);

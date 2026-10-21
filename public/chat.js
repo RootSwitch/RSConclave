@@ -149,6 +149,8 @@ const Chat = {
     const ctxField = el('span', { class: 'row' }, el('label', {}, 'ctx'), ctx);
     const syncCtx = ollamaOnly(ctxField, endpoint);
     const maxOut = maxTokensInput();
+    // Follows the model picker: levels, on/off, or nothing, as the model allows.
+    const reasoning = reasoningInput(() => [endpoint.value, model.value], '', endpoint, model);
     const errEl = el('div', { class: 'error-text' });
     /*
      * The first message is where a pasted document meets a model window, and
@@ -174,7 +176,7 @@ const Chat = {
     // the control that does it - the same mark the sidebar uses on the
     // sessions that result.
     const personaNoteEl = el('span', { class: 'muted' });
-    this.setup = { endpoint, model, persona, system, message, temp, ctx, maxOut, errEl, sizeEl, fitEl, presetSel, personaNoteEl, docState };
+    this.setup = { endpoint, model, persona, system, message, temp, ctx, maxOut, reasoning, errEl, sizeEl, fitEl, presetSel, personaNoteEl, docState };
 
     for (const ep of liveEndpoints()) endpoint.append(el('option', { value: ep.id }, ep.name));
     syncCtx(); // options exist now, so the kind is finally knowable
@@ -189,6 +191,7 @@ const Chat = {
         model.replaceChildren(el('option', {}, 'error'));
         errEl.textContent = err.message;
       }
+      reasoning._sync(); // a new list means a new selected model
     };
     if (App.config.endpoints.length) fillModels();
     else errEl.textContent = 'No endpoints configured - add one in Settings.';
@@ -205,6 +208,7 @@ const Chat = {
       temp.value = p.params?.temperature ?? '';
       ctx.value = p.params?.num_ctx ?? '';
       maxOut.value = p.params?.maxTokens ?? '';
+      setReasoning(reasoning, p.params?.reasoning);
       syncCtx();
       this.refreshSetupFit();
     };
@@ -220,7 +224,7 @@ const Chat = {
         personaId: persona.value || undefined,
         endpointId: endpoint.value,
         model: model.value,
-        params: genParams(temp.value, ctx.value, maxOut.value),
+        params: genParams(temp.value, ctx.value, maxOut.value, reasoningValue(reasoning)),
         // Kept if this preset already had one: the summariser is learned from
         // use (see the summarise fold), not typed in here.
         summarizer: existing?.summarizer,
@@ -245,6 +249,7 @@ const Chat = {
         el('label', {}, 'temp'), temp,
         ctxField,
         el('label', {}, 'max out'), maxOut,
+        reasoning,
       ),
       /*
        * Persona on its own line, out of the fold it used to share with the
@@ -327,6 +332,7 @@ const Chat = {
     // these on clone, so a chat that quietly lost its attached documents and
     // its output cap was inconsistent rather than deliberate.
     s.maxOut.value = config.params?.maxTokens ?? '';
+    setReasoning(s.reasoning, config.params?.reasoning);
     s.docState.ids = (config.documentIds ?? []).filter((id) => App.documents.some((d) => d.id === id));
     s.docState.sync?.();
     if (firstMessage) s.message.value = firstMessage;
@@ -347,7 +353,7 @@ const Chat = {
         endpointId: s.endpoint.value,
         // A profile resolves to its real model and its saved params here, so
         // the session records numbers rather than a reference to config.
-        ...seatFrom(s.endpoint.value, s.model.value, genParams(s.temp.value, s.ctx.value, s.maxOut.value)),
+        ...seatFrom(s.endpoint.value, s.model.value, genParams(s.temp.value, s.ctx.value, s.maxOut.value, reasoningValue(s.reasoning))),
         personaId: s.persona.value || undefined,
         systemPrompt: s.system.value.trim() || undefined,
         documentIds: s.docState.ids.length ? s.docState.ids : undefined,
