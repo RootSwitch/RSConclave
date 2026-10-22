@@ -18,6 +18,8 @@ sends nothing, which is what every seat did before, so existing presets and
 sessions behave exactly as they did. The choice is saved with presets and
 carried into clones and fork to chat. Ollama endpoints only: an
 OpenAI-compatible server has nothing to ask, and its seats show no box.
+The box is one fixed width everywhere, so a council row lines up with its
+neighbours whichever choices its model is offered.
 
 Roundtable and pipeline rows also stop running past their border on a long
 model name. A 75-character hf.co name made its picker 518px wide, which pushed

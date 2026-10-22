@@ -501,8 +501,8 @@ details[open] summary { margin-bottom: 9px; }
 /* The reasoning column sits after max out. Its box is hidden by visibility,
    not display, for a model without reasoning, so the column stays put and the
    remove button never slides into it. */
-.participant-row { grid-template-columns: 32px 110px 1fr 1fr 1fr 62px 72px 72px 140px 30px; }
-.stage-row { grid-template-columns: 140px 1fr 1fr 62px 72px 72px 140px 30px; }
+.participant-row { grid-template-columns: 32px 110px 1fr 1fr 1fr 62px 72px 72px 160px 30px; }
+.stage-row { grid-template-columns: 140px 1fr 1fr 62px 72px 72px 160px 30px; }
 .participant-row textarea, .stage-row textarea { grid-column: 1 / -1; min-height: 32px; }
 /* Cells may shrink below their content. A model picker is otherwise as wide as
    its longest option - 75 characters for an hf.co name, 518px - and the row
@@ -833,5 +833,10 @@ details.think .think-body {
 .rate-spark-wrap { color: var(--se-txt-dim); }
 .rate-spark { display: block; overflow: visible; }
 .rate-spark-wrap:has(.degraded) { color: var(--se-warn); }
-/* Wide enough for "reasoning: medium" in the flex rows too (chat, council). */
-select.reasoning-select { min-width: 140px; }
+/* A fixed width, not a minimum. A select is as wide as its longest option, so
+   a model offered levels ("reasoning: medium", 148px in Segoe UI) got a wider
+   box than one offered only on and off ("reasoning: default", 141px), and every
+   council row is right-aligned, so the persona, temp, ctx and max out boxes
+   before it shifted left on those rows. 160px holds the longest label with
+   room for a wider system font, and matches the grid column above. */
+select.reasoning-select { width: 160px; }
