@@ -9,11 +9,18 @@ high, the unsloth Qwen3.8 GGUF 196 and 308, while qwen3.6:27b gave
 byte-identical answers at low and high because its template only switches
 thinking on and off. So every seat - chat, council members and the
 consolidator, roundtable participants, pipeline stages - gets a box after max
-out whose choices come from the model's own `/api/show`: off, low, medium and
-high where the template takes a level, off and on where the model thinks but
-takes no level, and no box at all where it does not think. gpt-oss is offered
-no off, because it reasons whatever it is told - with thinking off, Ollama
-0.32.9 returned the same 118 characters of reasoning as with it on. Default
+out listing only the settings its model honours. Ollama 0.35 and later state
+them for the models whose prompt Ollama builds itself, and that is used as
+given. For a model whose prompt comes from the chat template in its GGUF file,
+the template is read for what it consults, because measured under Ollama
+0.40.11 a setting it does not read is silently dropped: off works only where
+it reads enable_thinking (deepseek-r1:32b and the flint and LFM2.5 GGUFs wrote
+identical reasoning with thinking off and on, so they get no box), and only
+the levels it names are offered (Hy-Memory's knows low and high, and turns
+medium into no thinking at all). gpt-oss is offered no off either, because it
+reasons whatever it is told - with thinking off, Ollama 0.32.9 returned the
+same 118 characters of reasoning as with it on. Where Ollama states a model's
+own default, the box's tooltip names it. Default
 sends nothing, which is what every seat did before, so existing presets and
 sessions behave exactly as they did. The choice is saved with presets and
 carried into clones and fork to chat. Ollama endpoints only: an

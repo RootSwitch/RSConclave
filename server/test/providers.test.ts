@@ -131,24 +131,45 @@ test('thinkNormalizer: empty deltas open nothing', async () => {
   assert.equal(out, 'answer');
 });
 
-/* ---------- reasoning: levels where the template takes them, think on the wire ---------- */
+/* ---------- reasoning: only the settings a model honours, think on the wire ---------- */
 
-test('parseModelInfo: a template that takes a reasoning level is told apart from one that does not', async () => {
+test('parseModelInfo: reasoning choices are read from what the template actually consults', async () => {
   const { parseModelInfo } = await import('../providers.ts');
-  // Excerpts of the real templates on a 3090: gpt-oss writes the level into
-  // its system message; the unsloth Qwen3.8 template reads reasoning_effort;
-  // qwen3.6:27b's only switches thinking on and off.
+  const choices = (data: object) => parseModelInfo({ capabilities: ['thinking'], ...data }).thinkChoices;
+  // Excerpts of the real templates on a 3090.
   const gptOss = '{{- if and .IsThinkSet .Think (ne .ThinkLevel "") }}\nReasoning: {{ .ThinkLevel }}\n{{- end }}';
-  const qwen38 = "{%- set resolved_reasoning_effort = reasoning_effort|default('xhigh') %}";
   const qwen36 = '{{- if .Think }}<think>\n{{ .Thinking }}\n</think>{{ end }}';
-  assert.equal(parseModelInfo({ template: gptOss, capabilities: ['thinking'] }).thinkLevels, true);
-  assert.equal(parseModelInfo({ template: qwen38, capabilities: ['thinking'] }).thinkLevels, true);
-  assert.equal(parseModelInfo({ template: qwen36, capabilities: ['thinking'] }).thinkLevels, false);
-  assert.equal(parseModelInfo({}).thinkLevels, false, 'no template, no levels');
-  // gpt-oss reasons with think:false too, so it is never offered "off".
-  assert.equal(parseModelInfo({ details: { family: 'gptoss' }, template: gptOss }).thinkAlways, true);
-  assert.equal(parseModelInfo({ details: { family: 'qwen35' }, template: qwen38 }).thinkAlways, false);
-  assert.equal(parseModelInfo({}).thinkAlways, false);
+  const qwen38 = "{%- if enable_thinking is undefined or enable_thinking is true %}\n"
+    + "{%- set resolved_reasoning_effort = reasoning_effort|default('xhigh') %}\n"
+    + "{%- if resolved_reasoning_effort == 'high' %}\n"
+    + "{%- if resolved_reasoning_effort not in ('xhigh', 'medium', 'low') %}";
+  const hyMemory = "{%- if not reasoning_effort is defined or reasoning_effort not in ['high', 'low', 'no_think'] %}";
+  const flint = '{%- macro flint_text(t) -%}{{- t | replace("\\x00", "") }}{%- endmacro %}<think>';
+  const gguf = { template_source: 'gguf_chat_template' };
+  // Ollama's Go templates: gpt-oss takes levels but cannot stop reasoning; qwen3.6 only switches.
+  assert.deepEqual(choices({ template: gptOss, details: { family: 'gptoss' } }), ['low', 'medium', 'high']);
+  assert.deepEqual(choices({ template: qwen36 }), ['off', 'on']);
+  // GGUF templates: off only where enable_thinking is read, and only the levels named.
+  assert.deepEqual(choices({ template: qwen38, ...gguf }), ['off', 'low', 'medium', 'high']);
+  assert.deepEqual(choices({ template: hyMemory, ...gguf }), ['low', 'high'], 'medium would mean no_think');
+  assert.deepEqual(choices({ template: flint, ...gguf }), ['on'], 'no switch at all: nothing to choose');
+  // A model that does not think has nothing to choose.
+  assert.deepEqual(parseModelInfo({ template: qwen36 }).thinkChoices, []);
+  assert.deepEqual(parseModelInfo({}).thinkChoices, []);
+});
+
+test('parseModelInfo: what Ollama states about reasoning outranks the template', async () => {
+  const { parseModelInfo } = await import('../providers.ts');
+  // Ollama 0.40.11's own words for three models it renders itself.
+  const gptOss = parseModelInfo({ thinking: { values: ['low', 'medium', 'high'], default: 'medium' }, template: '{{ .Prompt }}' });
+  assert.deepEqual(gptOss.thinkChoices, ['low', 'medium', 'high']);
+  assert.equal(gptOss.thinkDefault, 'medium');
+  const nemotron = parseModelInfo({ thinking: { values: [false, true], default: true }, capabilities: ['thinking'] });
+  assert.deepEqual(nemotron.thinkChoices, ['off', 'on']);
+  assert.equal(nemotron.thinkDefault, 'on');
+  // qwen3-coder: thinking off is its only value, so there is nothing to choose.
+  assert.deepEqual(parseModelInfo({ thinking: { values: [false], default: false } }).thinkChoices, ['off']);
+  assert.equal(parseModelInfo({}).thinkDefault, null);
 });
 
 test('thinkParam: the seat choice becomes Ollama\'s think field, or is left out', async () => {

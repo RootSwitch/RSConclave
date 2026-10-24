@@ -544,33 +544,25 @@ function genParams(tempValue, ctxValue, maxTokensValue, reasoning) {
  * How hard a seat's model reasons. Blank is the model's own default - what
  * every seat did before this existed - so nothing is sent unless chosen.
  *
- * The choices follow the model, read from /api/show, because what a model
- * does with a setting is the model's business and pretending otherwise is the
- * failure this avoids. Measured on a 3090 with one question: gpt-oss:20b spent
- * 110 reasoning tokens at low and 1,729 at high; the unsloth Qwen3.8-27B 196
- * and 308; qwen3.6:27b gave byte-identical answers at low and high, because its
- * template only switches thinking on and off. So levels are offered where the
- * template takes them (ModelInfo.thinkLevels), off/on where the model thinks
- * but takes no level, and nothing where it does not think at all. "Off" is
- * dropped for a model that reasons regardless (ModelInfo.thinkAlways): gpt-oss
- * wrote the same reasoning with thinking off as on. Ollama endpoints only: an
- * openai-compat server has no /api/show to ask.
+ * The choices are the ones the model actually honours (ModelInfo.thinkChoices,
+ * from /api/show), because a setting that is silently dropped is worse than no
+ * setting. Measured on a 3090: gpt-oss:20b spent 110 reasoning tokens at low
+ * and 1,729 at high, yet reasoned just the same with thinking off; flint and
+ * LFM2.5 from Hugging Face did too, their templates having no off switch; and
+ * qwen3.6:27b gave byte-identical answers at low and high. Fewer than two
+ * choices means nothing to choose, and the box is hidden. Ollama endpoints
+ * only: an openai-compat server has no /api/show to ask.
  *
  * source() returns [endpointId, pickerValue]; a profile resolves to its real
  * model. `watch` are the pickers whose changes should re-read the model. The
  * chosen value is kept in dataset.want, so moving a seat to a model without
  * reasoning and back again does not lose it.
  */
-const REASONING_CHOICES = {
-  levels: [['', 'reasoning: default'], ['off', 'reasoning: off'], ['low', 'reasoning: low'],
-    ['medium', 'reasoning: medium'], ['high', 'reasoning: high']],
-  onOff: [['', 'reasoning: default'], ['off', 'reasoning: off'], ['on', 'reasoning: on']],
-};
+const REASONING_TITLE = 'How hard this model reasons before answering. Default leaves it to the model. '
+  + 'Only the settings this model honours are listed.';
 
 function reasoningInput(source, value, ...watch) {
-  const sel = el('select', { class: 'reasoning-select', 'aria-label': 'Reasoning',
-    title: 'How hard this model reasons before answering. Default leaves it to the model. '
-      + 'Levels appear only for models whose template takes them; others only switch on and off.' });
+  const sel = el('select', { class: 'reasoning-select', 'aria-label': 'Reasoning', title: REASONING_TITLE });
   sel.dataset.want = value ?? '';
   sel.addEventListener('change', () => { sel.dataset.want = sel.value; });
   sel._sync = () => {
@@ -578,17 +570,19 @@ function reasoningInput(source, value, ...watch) {
     const real = profileFor(endpointId, pickerValue)?.model ?? pickerValue;
     const info = endpointOf(endpointId)?.kind === 'ollama' && real ? App.modelInfo(endpointId, real) : null;
     const want = sel.dataset.want ?? '';
-    if (!info?.capabilities?.includes('thinking')) {
-      // Hidden by visibility, not display, so a grid row keeps its columns.
+    const choices = info?.thinkChoices ?? [];
+    if (choices.length < 2) {
+      // Nothing to choose: the model does not think, or honours one setting
+      // only. Hidden by visibility, not display, so a grid row keeps its columns.
       sel.replaceChildren(el('option', { value: '' }, 'reasoning: default'));
       sel.disabled = true;
       sel.style.visibility = 'hidden';
       return;
     }
-    let opts = info.thinkLevels ? REASONING_CHOICES.levels : REASONING_CHOICES.onOff;
-    if (info.thinkAlways) opts = opts.filter(([v]) => v !== 'off');
+    const opts = [['', 'reasoning: default'], ...choices.map((v) => [v, `reasoning: ${v}`])];
     sel.replaceChildren(...opts.map(([v, label]) => el('option', { value: v }, label)));
     sel.value = opts.some(([v]) => v === want) ? want : '';
+    sel.title = REASONING_TITLE + (info.thinkDefault ? ` This model's default: ${info.thinkDefault}.` : '');
     sel.disabled = false;
     sel.style.visibility = '';
   };

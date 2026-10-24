@@ -280,18 +280,25 @@ answers, so nothing compounds.
 Every seat - a chat, each council member and the consolidator, each roundtable participant and
 pipeline stage - has a **reasoning** box after max out, for models that think before they
 answer. **Default** sends nothing and leaves it to the model, which is what every seat did
-before the box existed. The choices follow the model, read from Ollama's `/api/show`, because
-a setting the model quietly ignores is worse than no setting:
+before the box existed. The box lists only the settings the model actually honours, read from
+Ollama's `/api/show`, because a setting that is silently dropped is worse than no setting.
+
+Where Ollama builds the model's prompt itself, it says which settings the model takes, and
+that is used as given (Ollama 0.35 and later). Where the prompt comes from the chat template
+inside a GGUF file - most Hugging Face imports - the template is read for what it consults:
 
 | the model | offered | measured on one question, on a 3090 |
 |---|---|---|
-| its template takes a level (gpt-oss, the unsloth Qwen3.8 GGUF) | off, low, medium, high | gpt-oss:20b spent 110 reasoning tokens at low, 1,729 at high |
-| it thinks, but only on or off (qwen3.6, deepseek-r1) | off, on | qwen3.6:27b gave byte-identical answers at low and high |
-| it does not think | nothing - the box is hidden | |
+| takes levels (gpt-oss, the unsloth Qwen3.8 GGUF) | low, medium, high - and off where it can stop | gpt-oss:20b spent 110 reasoning tokens at low, 1,729 at high |
+| thinks, but only on or off (qwen3.6, Nemotron, Gemma 4) | off, on | qwen3.6:27b gave byte-identical answers at low and high |
+| always thinks, no switch (deepseek-r1, flint and LFM2.5 GGUFs) | nothing - the box is hidden | identical reasoning with thinking off and on |
+| does not think | nothing - the box is hidden | |
 
-gpt-oss is offered no **off**: it reasons whatever it is told, and Ollama ignores the switch for
-it. For the rest, off is the fast end and can be the wrong one - with thinking off, qwen3.6 got
-the test sum wrong. The choice is saved with presets and carried into clones and fork to chat.
+Only the levels a template names are offered: Hy-Memory's knows low and high and turns any other
+value, medium included, into no thinking at all. gpt-oss is offered no **off**, because it reasons
+whatever it is told. Off is the fast end and can be the wrong one - with thinking off, qwen3.6
+got the test sum wrong. Where Ollama states the model's own default, the box's tooltip names it.
+The choice is saved with presets and carried into clones and fork to chat.
 
 Ollama endpoints only. An OpenAI-compatible server has no `/api/show` to ask, so its seats show
 no box and send nothing.

@@ -1,6 +1,6 @@
 // Inference clients: model discovery + streaming chat for Ollama and
 // OpenAI-compatible (llama.cpp server) endpoints. Zero dependencies.
-import type { ChatMessage, Endpoint, GenParams, StreamResult } from './types.ts';
+import type { ChatMessage, Endpoint, GenParams, Reasoning, StreamResult } from './types.ts';
 
 const IDLE_TIMEOUT_MS = 120_000; // abort if no bytes arrive for this long mid-stream
 /*
@@ -48,23 +48,28 @@ export interface ModelInfo {
   parameterSize: string | null; // "33.4B"
   capabilities: string[];       // completion, tools, vision, thinking
   /*
-   * The model's template takes a reasoning LEVEL, not just on and off. Read
-   * from the template itself, because that is where a level either becomes
-   * something or is dropped: gpt-oss writes "Reasoning: {{ .ThinkLevel }}"
-   * into its system message, and Qwen3.8's template turns reasoning_effort
-   * into an instruction. A template mentioning neither ignores a level, so
-   * the app does not offer one.
+   * The reasoning settings a seat can actually choose for this model, besides
+   * leaving it to the model. Fewer than two means there is nothing to choose.
+   *
+   * Ollama 0.35 and later state them outright for the models it renders itself
+   * (`thinking.values` in /api/show), and that is used as given. For the rest -
+   * every model whose prompt is built from the chat template in its GGUF file -
+   * they are read from the template, because a setting the template does not
+   * read is silently dropped. Measured on a 3090 under Ollama 0.40.11:
+   *  - "off" works only where the template reads enable_thinking. flint and
+   *    LFM2.5 from Hugging Face and deepseek-r1:32b wrote identical reasoning
+   *    with think:false and think:true; the unsloth Qwen3.8 wrote none.
+   *  - levels exist only where the template reads reasoning_effort (or, in
+   *    Ollama's own Go templates, ThinkLevel), and only the ones it names.
+   *    Hy-Memory's knows low and high and turns anything else - medium
+   *    included - into no thinking at all.
+   *  - gpt-oss reasons whatever it is told: under 0.32.9 it wrote the same 118
+   *    characters of reasoning with thinking off as on. Known by family, since
+   *    nothing in its template says the channel cannot be closed.
    */
-  thinkLevels: boolean;
-  /*
-   * The model reasons whatever it is told, so "off" is not offered. gpt-oss
-   * answers in a format with its own reasoning channel, and Ollama ignores
-   * think:false for it - measured on Ollama 0.32.9, gpt-oss:20b wrote the same
-   * 118 characters of reasoning with think:false as with think:true, where
-   * the unsloth Qwen3.8 wrote none. Known by family, not template: nothing in
-   * the template says the channel cannot be closed.
-   */
-  thinkAlways: boolean;
+  thinkChoices: Reasoning[];
+  /** The model's own default where Ollama states it ('on', 'medium'), else null. */
+  thinkDefault: string | null;
   /*
    * Parameters the MODELFILE sets, not the effective values. An unset
    * temperature is absent here and Ollama's own default applies - so "no
@@ -110,10 +115,40 @@ export function parseModelInfo(data: any): ModelInfo {
     quantization: typeof det.quantization_level === 'string' ? det.quantization_level : null,
     parameterSize: typeof det.parameter_size === 'string' ? det.parameter_size : null,
     capabilities: Array.isArray(data?.capabilities) ? data.capabilities.map(String) : [],
-    thinkLevels: typeof data?.template === 'string' && /\bThinkLevel\b|\breasoning_effort\b/.test(data.template),
-    thinkAlways: det.family === 'gptoss',
+    ...reasoningChoices(data),
     params,
   };
+}
+
+const LEVELS = ['low', 'medium', 'high'] as const;
+
+/** See ModelInfo.thinkChoices: Ollama's own statement wins, else the template is read. */
+function reasoningChoices(data: any): { thinkChoices: Reasoning[]; thinkDefault: string | null } {
+  const label = (v: unknown): string => (v === false ? 'off' : v === true ? 'on' : String(v));
+  const known = (v: string): v is Reasoning => v === 'off' || v === 'on' || (LEVELS as readonly string[]).includes(v);
+  const stated = data?.thinking;
+  if (stated && Array.isArray(stated.values)) {
+    return {
+      thinkChoices: stated.values.map(label).filter(known),
+      thinkDefault: stated.default === undefined || stated.default === null ? null : label(stated.default),
+    };
+  }
+  const caps: unknown[] = Array.isArray(data?.capabilities) ? data.capabilities : [];
+  if (!caps.includes('thinking')) return { thinkChoices: [], thinkDefault: null };
+  const t: string = typeof data?.template === 'string' ? data.template : '';
+  const jinja = data?.template_source === 'gguf_chat_template' || t.includes('{%');
+  let levels: Reasoning[] = [];
+  if (/\bThinkLevel\b/.test(t)) {
+    levels = [...LEVELS];
+  } else if (/\breasoning_effort\b/.test(t)) {
+    // Only the levels the template names; one that names none takes all three.
+    const named = LEVELS.filter((l) => new RegExp(`['"]${l}['"]`).test(t));
+    levels = named.length ? named : [...LEVELS];
+  }
+  const off = data?.details?.family !== 'gptoss' && (!jinja || /\benable_thinking\b/.test(t));
+  const choices: Reasoning[] = off ? ['off'] : [];
+  choices.push(...(levels.length ? levels : ['on' as const]));
+  return { thinkChoices: choices, thinkDefault: null };
 }
 
 /**

@@ -124,11 +124,10 @@ export interface GenParams {
   /*
    * How hard a thinking model reasons, per seat. Absent means send nothing and
    * let the model's own default stand, which is what every seat did before
-   * this existed. 'off' and 'on' are all most thinking models understand;
-   * the three levels are offered only where the model's template takes them
-   * (see ModelInfo.thinkLevels), because a level sent to a model without them
-   * is silently treated as 'on' - measured, not assumed: qwen3.6:27b gave
-   * byte-identical output at low and high. Ollama endpoints only.
+   * this existed. A seat is offered only what its model honours (see
+   * ModelInfo.thinkChoices), because a setting a model does not read is
+   * silently dropped - measured, not assumed: qwen3.6:27b gave byte-identical
+   * output at low and high. Ollama endpoints only.
    */
   reasoning?: Reasoning;
 }
