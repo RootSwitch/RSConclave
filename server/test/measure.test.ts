@@ -223,3 +223,90 @@ test('ceiling: an under-promising projection reaches up by halves, within the lo
   assert.ok(Math.max(...m.loads) <= 8192 * 4 * 1.5 ** 2 + 4096, `never far past what was proven: ${m.loads}`);
   assert.ok(ceiling.numCtx !== null && ceiling.numCtx >= 32768, `found at least ${ceiling.numCtx}`);
 });
+
+/* ---------- measureContext against a fake daemon: other models on the card ---------- */
+
+/*
+ * Just enough Ollama to measure against. Loading a model evicts the others, as
+ * Ollama does when the new one needs the room. Unloading is NOT instant: a
+ * model told keep_alive 0 stays in /api/ps for a few more reads, which is what
+ * the real daemon does and what Measure all tripped over.
+ */
+async function fakeDaemon(card: number, disk: Record<string, number>, preloaded: Record<string, number> = {}) {
+  const { createServer } = await import('node:http');
+  const loaded = new Map<string, { size: number; vram: number; leavingIn?: number }>();
+  for (const [name, bytes] of Object.entries(preloaded)) loaded.set(name, { size: bytes, vram: bytes });
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+    const send = (obj: unknown) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+    if (req.url === '/api/tags') return send({ models: Object.entries(disk).map(([name, size]) => ({ name, size })) });
+    if (req.url === '/api/show') return send({ model_info: { 'general.architecture': 'fake', 'fake.context_length': 32768 } });
+    if (req.url === '/api/ps') {
+      const out = [...loaded].map(([name, m]) => ({ name, size: m.size, size_vram: m.vram }));
+      for (const [name, m] of loaded) {
+        if (m.leavingIn !== undefined && --m.leavingIn <= 0) loaded.delete(name);
+      }
+      return send({ models: out });
+    }
+    if (req.url === '/api/generate') {
+      if (body.keep_alive === 0) {
+        const m = loaded.get(body.model);
+        if (m) m.leavingIn = 3;
+        return send({ done: true });
+      }
+      for (const name of [...loaded.keys()]) if (name !== body.model) loaded.delete(name);
+      const size = disk[body.model] + 50_000 * (body.options?.num_ctx ?? 2048);
+      loaded.set(body.model, { size, vram: Math.min(size, card) });
+      return send({ done: true, response: 'x' });
+    }
+    res.writeHead(404); res.end();
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const port = (server.address() as { port: number }).port;
+  const endpoint = { id: 'fake', name: 'fake', baseUrl: `http://127.0.0.1:${port}`, kind: 'ollama' as const };
+  return { endpoint, loaded, close: () => server.close() };
+}
+
+test('measureContext: a model that fits the card is measured even with another model loaded', async () => {
+  const { measureContext } = await import('../measure.ts');
+  // The reported case: a 7 GB model on a 16 GB card was refused as "too big to
+  // fit at all" while a 12 GB model still held the card.
+  const d = await fakeDaemon(16 * GIB, { 'small:7b': 7 * B, 'big:12b': 12 * B }, { 'big:12b': 12 * GIB });
+  try {
+    const r = await measureContext(d.endpoint, 'small:7b', 16);
+    assert.ok(!r.skippedLoad, 'not refused: Ollama makes room by unloading the idle model');
+    assert.ok(r.probes.length >= 2, `${r.probes.length} probes`);
+    // The budget still names what was loaded, so a small number explains itself.
+    assert.deepEqual(r.vram.otherModels, ['big:12b']);
+  } finally {
+    d.close();
+  }
+});
+
+test('measureContext: a model bigger than the whole card is still refused without loading', async () => {
+  const { measureContext } = await import('../measure.ts');
+  const d = await fakeDaemon(16 * GIB, { 'huge:70b': 40 * B });
+  try {
+    const r = await measureContext(d.endpoint, 'huge:70b', 16);
+    assert.equal(r.skippedLoad, true);
+    assert.equal(d.loaded.size, 0, 'nothing was loaded');
+  } finally {
+    d.close();
+  }
+});
+
+test('measureContext: returns only once its own model has left the card', async () => {
+  const { measureContext } = await import('../measure.ts');
+  // Measure all starts the next model straight away. If this one were still
+  // listed, the next measurement would count it as another model holding the
+  // card and budget against the space it was about to give back.
+  const d = await fakeDaemon(16 * GIB, { 'small:7b': 7 * B });
+  try {
+    await measureContext(d.endpoint, 'small:7b', 16);
+    assert.equal(d.loaded.has('small:7b'), false, 'still in /api/ps when the measurement returned');
+  } finally {
+    d.close();
+  }
+});

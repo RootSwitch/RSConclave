@@ -470,9 +470,15 @@ export async function measureContext(
   // exists to catch the hopeless, not the tight. A model just over the
   // margin still has something worth measuring - and on a 24 GB card, an
   // MoE at 21 GB turned out to load entirely into VRAM.
+  //
+  // Nor less what other models hold. Another model on the card is not in the
+  // way: Ollama unloads an idle one to make room for the one being loaded.
+  // Subtracting it refused a 7 GB model on a 16 GB card during Measure all,
+  // where the previous model was still on its way out - with a message naming
+  // the whole card, so the refusal contradicted itself.
   const capacityBytes = Math.max(totalVramGb * GIB - heldByOthersBytes, 0);
   const onDisk = await diskSize(endpoint, model, opts.signal);
-  if (onDisk && onDisk >= capacityBytes) {
+  if (onDisk && onDisk >= totalVramGb * GIB) {
     return {
       model,
       probes: [],
@@ -563,7 +569,15 @@ export async function measureContext(
     || (onDisk !== null && probes.length > 0 && probes[0].total < onDisk * 0.9));
   if (ceiling && sizesUnderReported) ceiling.bytes = null;
 
+  /*
+   * Gone, not just asked to go. Unloading is not instant, and Measure all
+   * starts the next model straight away: that measurement found this one
+   * still in /api/ps, counted it as another model holding the card, and
+   * budgeted - or refused - the next model against the space it was about
+   * to give back.
+   */
   await unload(endpoint, model);
+  await waitUnloaded(endpoint, model);
 
   return {
     model,

@@ -147,6 +147,19 @@ unload() {
         -d "{\"model\":\"$MODEL\",\"keep_alive\":0}" >/dev/null 2>&1 || true
 }
 
+# Freeing VRAM is not instant; wait for the model to actually leave /api/ps
+# rather than sleeping a guessed interval. Also run at the end, so a loop over
+# every model does not find this one still on its way out and budget the next
+# model against the space it is about to give back.
+wait_gone() {
+    i=0
+    while [ $i -lt 20 ]; do
+        curl -sf -m 10 "$HOST/api/ps" 2>/dev/null | grep -qF "\"$PS_NAME\"" || break
+        i=$((i + 1))
+        sleep 1
+    done
+}
+
 # What else is holding the card, so a small budget explains itself instead of
 # just looking like a disappointing number.
 others() {
@@ -173,20 +186,14 @@ if [ -z "$VRAM_GB" ]; then
         exit 2
     fi
     unload
-    # Freeing VRAM is not instant; wait for the model to actually leave /api/ps
-    # rather than sleeping a guessed interval.
-    i=0
-    while [ $i -lt 20 ]; do
-        curl -sf -m 10 "$HOST/api/ps" 2>/dev/null | grep -qF "\"$PS_NAME\"" || break
-        i=$((i + 1))
-        sleep 1
-    done
+    wait_gone
 
     MEM=$(gpu_mem || true)
     TOTAL_MB=$(printf '%s' "${MEM:-}" | awk '{print $1+0}')
     FREE_MB=$(printf '%s' "${MEM:-}" | awk '{print $2+0}')
 
     if [ "${TOTAL_MB:-0}" -gt 0 ] 2>/dev/null; then
+        CARD_GB=$((TOTAL_MB / 1024))
         if [ "$ASSUME_EMPTY" -eq 1 ]; then
             VRAM_GB=$((TOTAL_MB / 1024))
             BASIS=empty
@@ -252,7 +259,12 @@ DISK=$(curl -sf -m 20 "$HOST/api/tags" 2>/dev/null | sed 's/{"name":/\n&/g' |
 # the margin still has something worth measuring, and refusing it would
 # answer a question it was never asked. An MoE slightly over the line is
 # the case that matters - it runs fine with a few layers in RAM.
-CAPACITY=$(awk -v v="$VRAM_GB" 'BEGIN{ printf "%d", v * 1073741824 }')
+#
+# The whole card, not what is free right now: VRAM_GB is the FREE figure when
+# detected, and another model on the card is not in the way - Ollama unloads
+# an idle one to make room. Free VRAM refused a 7 GB model on a 16 GB card
+# while something else was still loaded.
+CAPACITY=$(awk -v v="${CARD_GB:-$VRAM_GB}" 'BEGIN{ printf "%d", v * 1073741824 }')
 if [ -n "${DISK:-}" ] && [ "$DISK" -ge "$CAPACITY" ] 2>/dev/null; then
     awk -v d="$DISK" -v b="$CAPACITY" -v m="$MODEL" 'BEGIN{
         printf "\n%s\n", m;
@@ -269,6 +281,7 @@ HIGH_OUT=$(probe "$HIGH")
 
 # release the card again; leaving a model pinned is rude on a shared box
 unload
+wait_gone
 
 [ -n "$LOW_OUT" ] && [ -n "$HIGH_OUT" ] || { echo "could not read /api/ps for $PS_NAME" >&2; exit 1; }
 

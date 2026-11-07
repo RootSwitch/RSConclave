@@ -483,8 +483,8 @@ const Roundtable = {
         else textEl.textContent = e.text;
 
         const statsRow = [];
-        const stats = statsLine(e.stats);
-        if (stats) statsRow.push(el('span', {}, stats));
+        const stats = statsLine(e.stats, e.text);
+        if (stats) statsRow.push(el('span', { title: statsTitle(e.stats) }, stats));
         // Your turns and narrator injections included - see the chat view.
         if (complete && e.text) statsRow.push(copyButton(() => e.text));
         // Forking matters most here: a roundtable that takes an interesting

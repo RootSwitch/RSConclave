@@ -586,6 +586,12 @@ const Council = {
     f.consolidatorCtxEl.value = config.consolidator.params?.num_ctx ?? '';
     setReasoning(f.consolidatorReasoningEl, config.consolidator.params?.reasoning);
     f.unloadEl.checked = !!config.unloadBetweenModels;
+    // A preset saved before this setting existed carries nothing, and
+    // consolidating was what those runs did.
+    f.consolidateEl.checked = !config.skipConsolidation;
+    // Setting .checked fires nothing, and the consolidator's controls show or
+    // hide on this box's change event.
+    f.consolidateEl.dispatchEvent(new Event('change'));
     f.ballotEl.value = (config.ballot ?? []).join(', ');
     f.docState.ids = (config.documentIds ?? []).filter((id) => App.documents.some((d) => d.id === id));
     f.docState.sync?.();

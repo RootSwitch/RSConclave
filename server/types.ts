@@ -316,6 +316,14 @@ export interface RunState {
   // drops the oldest turns and answers anyway, so only Ollama's overflow
   // warning can say that. The meter hides entirely when the window is unknown.
   contextLocal?: boolean;
+  /*
+   * Characters streamed so far in the turn being written, and its entry. The
+   * browser adds each token it receives on top, so its context meter can count
+   * the reply as it grows - and still count right after reconnecting mid-turn.
+   * Set only while generating.
+   */
+  generatedChars?: number;
+  generatingEntryId?: string;
   lastError?: string;
   // Set only in the state served to NON-owners: the box is mid-generation on
   // someone else's run. Carries no detail about whose or what, on purpose.

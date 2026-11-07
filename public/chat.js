@@ -397,8 +397,8 @@ const Chat = {
         else textEl.textContent = e.text;
 
         const footer = [];
-        const s = statsLine(e.stats);
-        if (s) footer.push(el('span', {}, s));
+        const s = statsLine(e.stats, e.text);
+        if (s) footer.push(el('span', { title: statsTitle(e.stats) }, s));
         /*
          * Including your own messages. They used to be excluded on the theory
          * that you wrote them so you have them - but the whole point of

@@ -129,13 +129,40 @@ function entryComplete(entry, isStreamingNow = false) {
  * turn, so 80 tokens after a 6-second load reported 12 tok/s for a model
  * generating at 79 - and every conversation then looked like it sped up.
  */
-function statsLine(stats) {
+function statsLine(stats, text) {
   if (!stats || stats.durationMs === undefined) return '';
   const secs = stats.durationMs / 1000;
-  let s = `${stats.evalCount ?? '?'} tok · ${secs.toFixed(1)}s`;
+  const est = stats.evalCount === undefined ? estimatedOutput(text) : null;
+  let s = `${stats.evalCount ?? (est ? `~${est}` : '?')} tok · ${secs.toFixed(1)}s`;
   const rate = rateOf(stats);
   if (rate) s += ` · ${rate.toFixed(1)} tok/s`;
   return s;
+}
+
+/*
+ * Tokens a turn produced, estimated from its text, for the turns the server
+ * never counted. Ollama reports eval_count only in its final frame, which a
+ * skipped or cancelled turn never receives, and an OpenAI-compatible server
+ * reports none at all. Reasoning is included: it was generated, and it filled
+ * the window. Four characters per token, so a floor on code and markdown - the
+ * line marks it "~" and carries no rate.
+ */
+function estimatedOutput(text) {
+  const n = estimateTokens((text ?? '').replace(/<\/?think>/g, ''));
+  return n > 0 ? n : null;
+}
+
+/** Tooltip for a stats line whose count is an estimate; undefined when exact. */
+function statsTitle(stats) {
+  return stats && stats.evalCount === undefined
+    ? 'Estimated from the text, at about 4 characters per token - the server reported no count for this turn.'
+    : undefined;
+}
+
+/** " · ~3.4k tok" on the entry being written now, from the run's live count. */
+function liveCount(entryId) {
+  if (entryId !== App.liveEntryId || !App.liveChars) return '';
+  return ` · ~${fmtK(Math.ceil(App.liveChars / 4))} tok`;
 }
 
 /** Tokens per second for one turn, load time excluded where the provider says. */
@@ -809,8 +836,20 @@ function unfinishedReason(entry) {
     return {
       label: 'cancelled',
       title: 'Stopped part-way. The partial text is kept here to read, copy or continue, but it is not sent as context to later turns.',
-      // The user pressed the button; how far it got is not the question.
-      withStats: false,
+      // How far it got is often why it was stopped - a model reasoning at
+      // length towards the end of its window - so it is shown, estimated.
+      withStats: true,
+    };
+  }
+  /*
+   * Skip used to fall through to the green "done" pill, so a member abandoned
+   * part-way read exactly like one that finished - with "? tok" beside it.
+   */
+  if (entry.error === 'skipped') {
+    return {
+      label: 'skipped',
+      title: 'Skipped part-way so the rest of the council could answer. The partial text is kept here to read and copy; the consolidator is told this member was skipped and does not see it.',
+      withStats: true,
     };
   }
   /*
@@ -849,19 +888,19 @@ function entryStatus(entry, complete) {
   const unfinished = unfinishedReason(entry);
   if (unfinished) {
     const out = [el('span', { class: 'sev warn', title: unfinished.title }, unfinished.label)];
-    const st = unfinished.withStats ? statsLine(entry.stats) : null;
-    if (st) out.push(el('span', { class: 'stats' }, st));
+    const st = unfinished.withStats ? statsLine(entry.stats, entry.text) : null;
+    if (st) out.push(el('span', { class: 'stats', title: statsTitle(entry.stats) }, st));
     return out;
   }
   if (!complete) {
     // An open <think> with no close yet means the model is still reasoning -
     // say so instead of the generic "streaming", which reads as the answer.
     const reasoning = entry.text.includes('<think>') && !entry.text.includes('</think>');
-    return [el('span', { class: 'badge busy' }, reasoning ? 'reasoning' : 'streaming')];
+    return [el('span', { class: 'badge busy' }, (reasoning ? 'reasoning' : 'streaming') + liveCount(entry.id))];
   }
   const out = [el('span', { class: 'badge ok' }, 'done')];
-  const s = statsLine(entry.stats);
-  if (s) out.push(el('span', { class: 'stats' }, s));
+  const s = statsLine(entry.stats, entry.text);
+  if (s) out.push(el('span', { class: 'stats', title: statsTitle(entry.stats) }, s));
   return out;
 }
 
@@ -1500,6 +1539,10 @@ const App = {
   selected: new Set(),  // session ids ticked while selecting
   hideThinking: localStorage.getItem('rsconclave.hideThinking') === '1',
   streamBuf: new Map(), // entryId -> full streamed text; the pill reads this when hiding
+  // The turn being written: characters so far, seeded from the server's count
+  // on every state event and grown by each token. See RunState.generatedChars.
+  liveChars: 0,
+  liveEntryId: null,
   modelInfoByEndpoint: {}, // endpointId -> { model: {contextLength, numCtx} }
   session: null, // session currently shown (active run or a loaded historical one)
   runState: { sessionId: null, phase: 'idle' },
@@ -1603,7 +1646,8 @@ const App = {
       // with no <think> in it, and the pill would never say "reasoning" again.
       const pill = node.closest('.card')?.querySelector('.badge.busy');
       if (pill) {
-        pill.textContent = full.includes('<think>') && !full.includes('</think>') ? 'reasoning' : 'streaming';
+        pill.textContent = (full.includes('<think>') && !full.includes('</think>') ? 'reasoning' : 'streaming')
+          + liveCount(entryId);
       }
     }
   },
@@ -1954,13 +1998,22 @@ function renderStatus() {
   const wrap = document.getElementById('context-meter-wrap');
   wrap.classList.toggle('hidden', st.contextPct === undefined);
   if (st.contextPct !== undefined) {
+    /*
+     * The prompt PLUS the reply so far, while it streams. The window holds
+     * both, and a model reasoning at length fills it as it goes - the
+     * prompt-only figure sat at 40% while a reply pushed the real total past
+     * the window, which is the moment worth stopping it.
+     */
+    const gen = st.phase === 'generating' ? Math.ceil(App.liveChars / 4) : 0;
+    const used = (st.contextTokens ?? 0) + gen;
+    const pct = gen && st.contextWindow ? Math.round((used / st.contextWindow) * 100) : st.contextPct;
     const fill = document.getElementById('context-meter-fill');
-    fill.style.width = `${Math.min(100, st.contextPct)}%`;
-    fill.classList.toggle('warn', st.contextPct >= 90 && st.contextPct <= 100);
-    fill.classList.toggle('crit', st.contextPct > 100);
+    fill.style.width = `${Math.min(100, pct)}%`;
+    fill.classList.toggle('warn', pct >= 90 && pct <= 100);
+    fill.classList.toggle('crit', pct > 100);
     const label = document.getElementById('context-meter-label');
-    const base = `~${fmtK(st.contextTokens)} of ${fmtK(st.contextWindow)} ctx (${st.contextPct}%)`;
-    if (st.contextPct > 100) {
+    const base = `~${fmtK(used)} of ${fmtK(st.contextWindow)} ctx (${pct}%)` + (gen ? ` · reply ~${fmtK(gen)}` : '');
+    if (pct > 100) {
       // Only Ollama quietly drops the oldest turns and answers anyway. Another
       // server's behaviour past its window is its own business, and claiming
       // otherwise sent people to look at the wrong machine.
@@ -1968,13 +2021,38 @@ function renderStatus() {
         ? `${base} - OVERFLOWING: Ollama is silently truncating from the top!`
         : `${base} - OVER THE LIMIT for this server's context window`;
       label.classList.add('ctx-overflow');
-    } else if (st.contextPct >= 90) {
+    } else if (pct >= 90) {
       label.textContent = `${base} - nearly full`;
       label.classList.add('ctx-overflow');
     } else {
       label.textContent = base;
       label.classList.remove('ctx-overflow');
     }
+  }
+}
+
+/*
+ * Tokens arrive dozens a second; the meter needs to keep up with them, not
+ * repaint for each one. One render per frame, and none while the tab is hidden.
+ */
+let statusQueued = false;
+function scheduleStatus() {
+  if (statusQueued) return;
+  statusQueued = true;
+  requestAnimationFrame(() => {
+    statusQueued = false;
+    renderStatus();
+  });
+}
+
+/** Take the server's count for the turn being written; see RunState.generatedChars. */
+function syncLive(state) {
+  if (state.phase === 'generating') {
+    App.liveChars = state.generatedChars ?? 0;
+    App.liveEntryId = state.generatingEntryId ?? App.liveEntryId;
+  } else {
+    App.liveChars = 0;
+    App.liveEntryId = null;
   }
 }
 
@@ -1998,6 +2076,7 @@ function connectSse() {
   es.addEventListener('snapshot', (ev) => {
     const { state, session } = JSON.parse(ev.data);
     App.runState = state;
+    syncLive(state);
     if (session) {
       if (App.session?.id === session.id) {
         // Already attached: take the fresh data (the run may have advanced
@@ -2018,6 +2097,7 @@ function connectSse() {
 
   es.addEventListener('state', (ev) => {
     App.runState = JSON.parse(ev.data);
+    syncLive(App.runState);
     renderStatus();
     currentViewUpdate();
     if (App.runState.phase !== 'generating') renderBoxStatus();
@@ -2036,7 +2116,15 @@ function connectSse() {
 
   es.addEventListener('token', (ev) => {
     const { entryId, delta } = JSON.parse(ev.data);
+    // Server events arrive in order, so the count a state event carried
+    // already includes every token sent before it; these are the ones after.
+    if (entryId !== App.liveEntryId) {
+      App.liveEntryId = entryId;
+      App.liveChars = 0;
+    }
+    App.liveChars += delta.length;
     App.appendToken(entryId, delta);
+    scheduleStatus();
   });
 
   es.addEventListener('busy', (ev) => {

@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+**The context meter counts the reply as it streams.** It used to measure only
+the prompt, filled in once before the first token, so a model reasoning at
+length towards the end of its window showed 40% while the real total went past
+it - the moment you would want to stop it. While a turn streams, the meter now
+shows the prompt plus the reply so far, reasoning included ("~13k of 32k ctx
+(41%) · reply ~4.1k"), with the same warnings at 90% and past 100%, and a
+council or pipeline card's pill reads "reasoning · ~3.4k tok". The server keeps
+the running count, so a browser that slept through half a turn - a phone at the
+lock screen - picks up the right figure when it reconnects instead of counting
+from zero.
+
+**Skipped and cancelled turns show how far they got.** Ollama reports a turn's
+token count only in its final message, which a skipped or cancelled turn never
+receives, so those turns read "? tok"; an OpenAI-compatible server never
+reports one at all. Where the count is missing it is now estimated from the
+text at about four characters per token, marked "~" and explained on hover,
+and older sessions get it too. A skipped council member also stops wearing the
+green "done" pill: it reads "skipped", and says the consolidator was told it
+was skipped and never saw its text.
+
+**Measure all stops refusing models that fit.** The check that declines to
+load a model too big for the card compared it against the card minus every
+other loaded model - and during Measure all the previous model was usually
+still on its way out, because a measurement asked Ollama to unload it but did
+not wait. A 7 GB model was refused on a 16 GB card, with a message naming the
+whole card. The check now uses the whole card, since Ollama unloads an idle
+model to make room for the one being loaded, and each measurement waits for its
+model to leave before the next begins - which also stops the next model's
+recommendation being budgeted against space about to come free. measure-ctx.sh
+had the same two faults and has the same two fixes.
+
+**Clone to new keeps a council's consolidation setting.** Cloning a council, or
+loading a preset, ticked "consolidate the answers" whatever the original had.
+It now follows the session or preset; presets saved before the setting existed
+keep consolidating, as they always did.
+
 **A reasoning box on every seat.** Some models will think harder or less hard
 on request, and whether they will is a property of the model, not the app:
 gpt-oss:20b spent 110 reasoning tokens on one question at low and 1,729 at

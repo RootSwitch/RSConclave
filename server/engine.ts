@@ -50,6 +50,15 @@ interface Active {
   phase: RunState['phase'];
   currentSpeaker?: string;
   waitingFirstToken: boolean;
+  /*
+   * Characters streamed so far in the turn being written, and which entry.
+   * Kept here rather than counted only in the browser, because a browser that
+   * slept through half a turn reconnects to the tokens from then on - and a
+   * context meter counting from the reconnect would read low exactly when a
+   * long reasoning run is the thing being watched.
+   */
+  liveChars?: number;
+  liveEntryId?: string;
   contextPct?: number;
   contextTokens?: number;
   contextWindow?: number;
@@ -136,6 +145,8 @@ export function getState(username: string): RunState {
     contextWindow: active.contextWindow,
     contextLocal: active.contextLocal,
     lastError: active.lastError,
+    generatedChars: active.phase === 'generating' ? active.liveChars || undefined : undefined,
+    generatingEntryId: active.phase === 'generating' ? active.liveEntryId : undefined,
   };
   if (active.session.mode === 'roundtable' && (active.phase === 'awaiting_gate' || active.phase === 'auto_stepping')) {
     const cfg = active.session.config as RoundtableConfig;
@@ -338,6 +349,8 @@ async function runTurn(a: Active, opts: {
   a.currentSpeaker = opts.entrySeed.speaker;
   a.waitingFirstToken = true;
   a.lastError = undefined;
+  a.liveChars = 0;
+  a.liveEntryId = undefined;
   pushState();
 
   /*
@@ -388,6 +401,7 @@ async function runTurn(a: Active, opts: {
 
   const entry = opts.appendTo ?? addEntry({ ...opts.entrySeed, text: '' }, a);
   const baseText = opts.appendTo ? opts.appendTo.text : '';
+  a.liveEntryId = entry.id;
   try {
     const result = await streamChat({
       endpoint: ep,
@@ -399,7 +413,10 @@ async function runTurn(a: Active, opts: {
         a.waitingFirstToken = false;
         pushState();
       },
-      onDelta: (delta) => broadcast('token', { entryId: entry.id, delta }, a.owner),
+      onDelta: (delta) => {
+        a.liveChars = (a.liveChars ?? 0) + delta.length;
+        broadcast('token', { entryId: entry.id, delta }, a.owner);
+      },
     });
     entry.text = baseText + result.text;
     entry.stats = result.stats;

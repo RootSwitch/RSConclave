@@ -89,7 +89,8 @@ session someone exported; **continue** a reply that stopped on its token budget,
 place rather than as a second bubble; `<think>` reasoning blocks (deepseek-r1 style) are
 collapsed in the UI and stripped from all downstream context; the sidebar shows what's loaded
 on each box (VRAM) via `/api/ps`; sessions can be renamed; every response has a copy button
-and tok/s stats; Enter steps the roundtable when the gate is open; council/roundtable/pipeline
+and tok/s stats, with the count estimated (marked `~`) for a turn cut short by Skip or Cancel,
+which the server never counts; Enter steps the roundtable when the gate is open; council/roundtable/pipeline
 setups can be saved as named presets. The sidebar is draggable, and its width is remembered.
 
 ## Try it without a GPU
@@ -171,7 +172,10 @@ nothing in any log to explain it.
 So RSConclave surfaces it. Every model picker shows the model's real window via Ollama's
 `/api/show`: `ctx 4k (default) / 128k max` means the model is trained for 128k but running at
 the 4k server default. The status-strip meter measures each turn's actual prompt against the
-*current speaker's* window, turns red past 90%, and warns explicitly past 100%. Fix a too-small
+*current speaker's* window, turns red past 90%, and warns explicitly past 100%. While the reply
+streams it counts that too, reasoning included (`~13k of 32k ctx (41%) · reply ~4.1k`), so a
+model thinking its way towards the end of its window is visible before it gets there, and worth
+a Skip or Cancel then rather than after. Fix a too-small
 window by setting `num_ctx` per participant or member (next to the temperature field), in the
 Modelfile, or with `OLLAMA_CONTEXT_LENGTH` on the server. Bigger windows cost VRAM.
 
