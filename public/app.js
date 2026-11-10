@@ -2411,6 +2411,9 @@ async function init() {
     if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey) return;
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    // The print view lies over the session; Enter there must not step a
+    // roundtable the reader cannot see.
+    if (PrintView.root) return;
     if (App.currentView !== 'roundtable' || App.runState.phase !== 'awaiting_gate') return;
     // Scope to the roundtable view: chat mounts its own #gate-bar, and a
     // hidden chat view earlier in the DOM would otherwise shadow this one.
@@ -2441,7 +2444,14 @@ init();
 function exportControls(session) {
   const withReasoning = el('input', { type: 'checkbox' });
   withReasoning.checked = true;
-  const q = () => (withReasoning.checked ? '' : '?reasoning=0');
+  const withPrompt = el('input', { type: 'checkbox' });
+  withPrompt.checked = true;
+  const q = () => {
+    const off = [];
+    if (!withReasoning.checked) off.push('reasoning=0');
+    if (!withPrompt.checked) off.push('prompt=0');
+    return off.length ? `?${off.join('&')}` : '';
+  };
   const mdLink = el('a', { href: `/api/sessions/${session.id}/export.md`, download: '' },
     el('button', {}, 'Export markdown'));
   const zipLink = session.mode === 'council'
@@ -2455,14 +2465,205 @@ function exportControls(session) {
     if (zipLink) zipLink.href = `/api/sessions/${session.id}/export.zip${q()}`;
   };
   withReasoning.addEventListener('change', sync);
+  withPrompt.addEventListener('change', sync);
   sync();
   return el('span', { class: 'row' },
     mdLink, zipLink,
+    printViewButton(session, () => ({ prompt: withPrompt.checked, reasoning: withReasoning.checked })),
     el('label', { class: 'row muted', style: 'gap: 4px',
       title: 'Reasoning is the model thinking aloud. Useful to read, wasteful to feed to another model.' },
       withReasoning, 'reasoning'),
+    el('label', { class: 'row muted', style: 'gap: 4px',
+      title: 'What was asked. Off when you only want the answers - the prompt is often the same few paragraphs at the top of every file.' },
+      withPrompt, 'prompt'),
   );
 }
+
+/* ---------- print view ---------- */
+
+/*
+ * A session as one flowing document, to print or save as PDF.
+ *
+ * Printing the app itself gave one page: the transcript lives in a scroller
+ * inside a full-height layout, and the printer only ever saw the screenful
+ * that fitted the window. This lays the same entries out as a plain document
+ * in the current theme, with the prompt, the reasoning or any single answer
+ * left out on request. Ctrl+P on a session opens it for the length of the
+ * print, so printing the ordinary way works too.
+ *
+ * The page-level choices live in the stylesheet (see "Print view" there):
+ * @page { margin: 0 } keeps the browser's header and footer - title, this
+ * page's address, date - off the paper, a spacer repeated on every page gives
+ * the margin back in the page's own colour, and print-color-adjust keeps the
+ * theme instead of swapping it for white paper.
+ */
+const PrintView = {
+  root: null,
+  session: null,
+  opts: null,
+  excluded: new Set(), // entry ids unticked in this print view
+  transient: false,    // opened by Ctrl+P rather than the button: closes after printing
+
+  open(session, opts = {}, transient = false) {
+    this.close();
+    this.session = session;
+    this.opts = { prompt: opts.prompt !== false, reasoning: opts.reasoning !== false };
+    this.excluded = new Set();
+    this.transient = transient;
+    this.root = el('div', { id: 'print-view' });
+    document.body.append(this.root);
+    document.documentElement.classList.add('printing');
+    this.render();
+    document.addEventListener('keydown', this.onKey);
+  },
+
+  close() {
+    if (!this.root) return;
+    this.root.remove();
+    this.root = null;
+    this.session = null;
+    document.documentElement.classList.remove('printing');
+    document.removeEventListener('keydown', this.onKey);
+    renderTitle();
+  },
+
+  onKey(ev) {
+    if (ev.key === 'Escape' && !PrintView.transient) PrintView.close();
+  },
+
+  render() {
+    const s = this.session;
+    const o = this.opts;
+    const toggle = (key, label, title) => {
+      const box = el('input', { type: 'checkbox', id: `print-opt-${key}` });
+      box.checked = o[key];
+      box.addEventListener('change', () => { o[key] = box.checked; this.render(); });
+      return el('label', { class: 'row', style: 'gap: 4px', title }, box, label);
+    };
+    const controls = el('div', { class: 'print-controls' },
+      el('button', { onclick: () => this.close(), title: 'Back to the session (Esc)' }, '← Back'),
+      el('strong', {}, 'Print view'),
+      toggle('prompt', 'prompt', 'What was asked'),
+      toggle('reasoning', 'reasoning', 'The models thinking aloud, shown in full'),
+      el('span', { class: 'muted' }, 'Untick an entry to leave it out.'),
+      el('span', { class: 'grow' }),
+      el('button', { class: 'primary', onclick: () => window.print(),
+        title: 'Choose "Save to PDF" as the printer for a PDF. If an address prints at the top, set Margins to Default.' },
+        'Print / Save as PDF'));
+
+    const doc = el('td', { class: 'print-doc' },
+      el('h1', { class: 'print-title' }, s.title),
+      el('div', { class: 'print-meta' }, printMeta(s)));
+    let asked = 0;
+    for (const e of s.entries) {
+      if (e.kind === 'user' && !o.prompt) continue;
+      const label = printLabel(s, e, e.kind === 'user' ? asked++ : 0);
+      doc.append(this.entrySection(e, label));
+    }
+    if (doc.childElementCount === 2) doc.append(el('p', { class: 'muted' }, 'Nothing to print with these settings.'));
+
+    this.root.replaceChildren(
+      controls,
+      el('div', { class: 'print-bg' }),
+      // The header and footer groups repeat on every printed page; their
+      // spacers are the top and bottom margin, in the page's own colour.
+      el('table', { class: 'print-frame' },
+        el('thead', {}, el('tr', {}, el('td', {}, el('div', { class: 'print-spacer' })))),
+        el('tfoot', {}, el('tr', {}, el('td', {}, el('div', { class: 'print-spacer' })))),
+        el('tbody', {}, el('tr', {}, doc))));
+  },
+
+  entrySection(e, label) {
+    const section = el('section', { class: `print-entry print-${e.kind}` });
+    section.classList.toggle('excluded', this.excluded.has(e.id));
+    const include = el('input', { type: 'checkbox', class: 'print-include', title: 'Include this entry', 'aria-label': `Include ${label}` });
+    include.checked = !this.excluded.has(e.id);
+    include.addEventListener('change', () => {
+      if (include.checked) this.excluded.delete(e.id); else this.excluded.add(e.id);
+      section.classList.toggle('excluded', !include.checked);
+    });
+    const marks = [];
+    if (e.kind === 'error') marks.push(el('span', { class: 'sev crit' }, 'error'));
+    const unfinished = unfinishedReason(e);
+    if (unfinished) marks.push(el('span', { class: 'sev warn' }, unfinished.label));
+    const stats = statsLine(e.stats, e.text);
+
+    const body = el('div', { class: 'print-body' });
+    const text = e.kind === 'user' || this.opts.reasoning ? e.text : stripThinkText(e.text);
+    if (e.kind === 'error') {
+      body.append(el('p', {}, e.error ?? 'error'));
+    } else if (text.trim()) {
+      renderEntryText(body, text, e.kind);
+      // Folded reasoning would print as one word; on paper it is shown whole.
+      for (const d of body.querySelectorAll('details.think')) {
+        d.open = true;
+        d.querySelector('summary').textContent = 'reasoning';
+      }
+    } else {
+      body.append(el('p', { class: 'muted' }, this.opts.reasoning
+        ? '(empty)'
+        : '(nothing but reasoning - this turn stopped before writing an answer; tick reasoning to see it)'));
+    }
+    section.append(
+      el('div', { class: 'print-entry-head' },
+        include,
+        el('span', { class: 'print-label' }, label),
+        ...marks,
+        el('span', { class: 'grow' }),
+        stats ? el('span', { class: 'stats' }, stats) : null),
+      body);
+    return section;
+  },
+};
+
+/** What an entry is called on paper; the same names the markdown export uses. */
+function printLabel(session, e, askedIndex) {
+  if (e.kind === 'user') {
+    if (session.mode === 'council') return askedIndex === 0 ? 'Prompt' : 'Follow-up';
+    if (session.mode === 'pipeline') return 'Input';
+    return e.speaker || 'You';
+  }
+  if (e.kind === 'consolidation') return `${session.mode === 'chat' ? 'Summary' : 'Consolidation'} - ${e.speaker}`;
+  return e.model && e.speaker !== e.model ? `${e.speaker} (${e.model})` : e.speaker;
+}
+
+/** One line under the title: what kind of session, when, and who took part. */
+function printMeta(session) {
+  const c = session.config ?? {};
+  const when = new Date(session.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  const who = session.mode === 'council' ? `Members: ${(c.members ?? []).map((m) => m.model).join(', ')}`
+    : session.mode === 'chat' ? `Model: ${c.model ?? '?'}`
+      : session.mode === 'pipeline' ? `Stages: ${(c.stages ?? []).map((st) => st.name?.trim() || st.model).join(' → ')}`
+        : `Participants: ${(c.participants ?? []).map((p) => p.name).join(', ')}`;
+  const mode = { council: 'Council', chat: 'Chat', pipeline: 'Pipeline', roundtable: 'Roundtable' }[session.mode] ?? session.mode;
+  return `${mode} · ${when} · ${who}`;
+}
+
+/**
+ * The button that opens it. `getOpts` lets the council's export bar hand over
+ * its own prompt and reasoning boxes, so what you set there is what you see.
+ */
+function printViewButton(session, getOpts = () => ({})) {
+  return el('button', {
+    title: 'The whole session as one document, to print or save as PDF',
+    onclick: () => PrintView.open(App.session?.id === session.id ? App.session : session, getOpts()),
+  }, 'Print view');
+}
+
+/*
+ * Ctrl+P on a session prints the document rather than the one screenful the
+ * app shows, by opening the print view for the length of the print. Either
+ * way the session's title becomes the page title, which is what browsers
+ * offer as the PDF's file name.
+ */
+addEventListener('beforeprint', () => {
+  if (!PrintView.root && App.session) PrintView.open(App.session, {}, true);
+  if (PrintView.session) document.title = PrintView.session.title;
+});
+addEventListener('afterprint', () => {
+  if (PrintView.transient) PrintView.close();
+  else renderTitle();
+});
 
 /*
  * The endpoints a setup form should offer: everything not switched off.

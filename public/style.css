@@ -840,3 +840,120 @@ details.think .think-body {
    before it shifted left on those rows. 160px holds the longest label with
    room for a wider system font, and matches the grid column above. */
 select.reasoning-select { width: 160px; }
+
+/* Task list items ("- [ ]", "- [x]"): a read-only tick box where the bracket
+   was. Full strength, not the faded look of a disabled form control - it is
+   content, not a control that happens to be off. */
+.md li.md-task { list-style: none; margin-left: -18px; }
+.md li.md-task input { margin-right: 6px; vertical-align: -2px; }
+.md li.md-task input:disabled { opacity: 1; cursor: default; }
+
+/* ===== Print view =====
+   A session as one flowing document (PrintView in app.js). On screen it lies
+   over the app and scrolls on its own; printed, it is the only thing on the
+   page. */
+#print-view {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    overflow: auto;
+    background: var(--se-panel-2);
+}
+.print-controls {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 10px 16px;
+    background: var(--se-panel);
+    border-bottom: 1px solid var(--se-border);
+}
+.print-bg { display: none; }
+.print-frame {
+    width: 100%;
+    max-width: var(--content-w);
+    margin: 0 auto;
+    border-collapse: collapse;
+}
+.print-frame > * > tr > td { padding: 0 16px; vertical-align: top; }
+.print-spacer { height: 16px; }
+.print-title { font-size: 22px; font-weight: 600; line-height: 1.25; margin: 6px 0 4px; }
+.print-meta {
+    color: var(--se-txt-dim);
+    font-size: 12px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--se-accent);
+}
+.print-entry {
+    background: var(--se-panel);
+    border: 1px solid var(--se-border);
+    border-radius: 6px;
+    margin: 0 0 12px;
+}
+.print-entry.print-user { background: var(--se-input); }
+.print-entry.print-consolidation { border-color: var(--se-accent); }
+.print-entry-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--se-border);
+    font-size: 13px;
+}
+.print-label { font-weight: 600; }
+.print-entry-head .stats { color: var(--se-txt-dim); font-size: 11px; }
+.print-body { padding: 10px 12px; }
+/* Left out: on screen it stays visible, faded and collapsed, so you can see
+   what you dropped and tick it back; printed, it is gone. */
+.print-entry.excluded { opacity: 0.4; }
+.print-entry.excluded .print-body { display: none; }
+.print-entry.excluded .print-entry-head { border-bottom: none; }
+/* Paper cannot scroll or click. Code wraps instead of hiding its line ends,
+   tables show every column, the copy and save buttons go, and reasoning is
+   labelled rather than folded behind a disclosure arrow. */
+#print-view .md-codebar button { display: none; }
+#print-view .md pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; }
+#print-view .md .md-tablewrap { overflow: visible; }
+#print-view details.think summary { list-style: none; cursor: default; }
+#print-view details.think summary::-webkit-details-marker { display: none; }
+
+/* The theme prints as the theme: without this, browsers swap backgrounds for
+   white paper and leave light text on it. */
+html.printing, html.printing * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+@media print {
+    /* No page margin, so no room for the header and footer browsers draw in it
+       - page title, this page's address, date. Chrome skips them when they do
+       not fit, and so does Firefox (read from its source: it draws only when
+       the margin is taller than the line), while its print dialog's Margins
+       setting is Default. */
+    @page { margin: 0; }
+    html.printing, html.printing body {
+        height: auto !important;
+        overflow: visible !important;
+        background: var(--se-panel-2);
+    }
+    html.printing body > :not(#print-view) { display: none !important; }
+    #print-view { position: static; overflow: visible; }
+    .print-controls, .print-include, .print-entry.excluded { display: none !important; }
+    /* The page colour behind every page, edge to edge: fixed elements repeat
+       on each printed page. */
+    .print-bg {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        background: var(--se-panel-2);
+    }
+    .print-frame { max-width: none; }
+    .print-frame > * > tr > td { padding: 0 14mm; }
+    /* In the table's header and footer groups, which print on every page: the
+       top and bottom margin, in the page's colour instead of white. */
+    .print-spacer { height: 12mm; }
+    .print-entry-head { break-after: avoid; }
+}

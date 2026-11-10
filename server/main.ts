@@ -622,9 +622,10 @@ route('GET', '/api/sessions/:id/export.md', (req, res, params, query) => {
   // ?reasoning=0 drops <think> blocks. Default on: the reasoning is often the
   // interesting part for a human reader, and only costly when the reader is
   // another model.
+  // ?prompt=0 drops the user's turns, the same way.
   const wantReasoning = query.get('reasoning') !== '0';
   const md = sessionToMarkdown(s, store.loadUser<Persona[]>(me, 'personas', DEFAULT_PERSONAS),
-    { reasoning: wantReasoning });
+    { reasoning: wantReasoning, prompt: query.get('prompt') !== '0' });
   res.writeHead(200, {
     'content-type': 'text/markdown; charset=utf-8',
     'content-disposition': `attachment; filename="${s.id}.md"`,
@@ -645,7 +646,10 @@ route('GET', '/api/sessions/:id/export.zip', (req, res, params, query) => {
   const s = store.loadSession<Session>(me, params.id);
   if (!s) throw new HttpError(404, 'session not found');
   if (s.mode !== 'council') throw new HttpError(400, 'per-answer export is a council thing');
-  const files = councilToFiles(s, { reasoning: query.get('reasoning') !== '0' });
+  const files = councilToFiles(s, {
+    reasoning: query.get('reasoning') !== '0',
+    prompt: query.get('prompt') !== '0',
+  });
   if (!files.length) throw new HttpError(400, 'this council has no answers yet');
   const zip = makeZip(files);
   res.writeHead(200, {

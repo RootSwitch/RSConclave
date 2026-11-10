@@ -39,6 +39,7 @@ const Roundtable = {
       ),
       el('div', { class: 'row', style: 'margin-bottom: 8px' },
         el('a', { href: `/api/sessions/${session.id}/export.md`, download: '' }, el('button', {}, 'Export markdown')),
+        printViewButton(session),
         el('a', { href: `/api/sessions/${session.id}`, target: '_blank' }, el('button', {}, 'View JSON')),
         cloneButton(session),
         /*

@@ -119,11 +119,17 @@ function parseMarkdown(raw) {
     if ((m = line.match(/^\s*([-*]|\d+\.)\s+/))) {
       const ordered = /\d/.test(m[1]);
       const items = [];
+      // Task lists: "[ ]" or "[x]" opening an item is a tick box, not text.
+      // Checklists are a large part of what models are asked to write, and as
+      // literal brackets they read as noise - in the app and on paper alike.
+      const checks = [];
       while (i < lines.length && (m = lines[i].match(/^\s*(?:[-*]|\d+\.)\s+(.*)$/))) {
-        items.push(mdInline(m[1]));
+        const task = m[1].match(/^\[([ xX])\]\s+(.*)$/);
+        checks.push(task ? task[1] !== ' ' : null);
+        items.push(mdInline(task ? task[2] : m[1]));
         i++;
       }
-      blocks.push({ t: 'list', ordered, items });
+      blocks.push({ t: 'list', ordered, items, checks });
       continue;
     }
 
@@ -215,7 +221,14 @@ function mdRender(container, text) {
           el('thead', {}, el('tr', {}, ...b.head.map((c) => el('th', {}, ...inline(c))))),
           el('tbody', {}, ...b.rows.map((r) => el('tr', {}, ...r.map((c) => el('td', {}, ...inline(c)))))))));
     } else if (b.t === 'list') {
-      container.append(el(b.ordered ? 'ol' : 'ul', {}, ...b.items.map((it) => el('li', {}, ...inline(it)))));
+      container.append(el(b.ordered ? 'ol' : 'ul', {}, ...b.items.map((it, idx) => {
+        const done = b.checks?.[idx];
+        if (done === null || done === undefined) return el('li', {}, ...inline(it));
+        // Read-only: ticking a model's checklist would change nothing it stored.
+        const box = el('input', { type: 'checkbox', disabled: '', 'aria-label': done ? 'done' : 'not done' });
+        box.checked = done;
+        return el('li', { class: 'md-task' }, box, ...inline(it));
+      })));
     } else {
       const p = el('p', {});
       b.lines.forEach((lineParts, idx) => {

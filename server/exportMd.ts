@@ -46,6 +46,12 @@ function splitThinking(text: string): { thinking: string[]; body: string } {
  */
 export interface ExportOptions {
   reasoning?: boolean;
+  /*
+   * `prompt: false` leaves out what was asked - the user's turns. For a set of
+   * answers being taken away to review, the prompt is often the same few
+   * paragraphs at the top of every file, read once already.
+   */
+  prompt?: boolean;
 }
 
 export function sessionToMarkdown(
@@ -125,6 +131,7 @@ export function sessionToMarkdown(
   lines.push('');
 
   for (const e of session.entries) {
+    if (e.kind === 'user' && opts.prompt === false) continue;
     const label =
       e.kind === 'consolidation'
         // In a chat the consolidation is a summary written for memory; the
@@ -168,7 +175,8 @@ export function sessionToMarkdown(
  * hand to a model in one piece.
  *
  * Every file repeats the prompt. They are going to be read apart from each
- * other, and an answer without its question is a document nobody can check.
+ * other, and an answer without its question is a document nobody can check -
+ * unless the reader asks for it to be left out (`prompt: false`).
  */
 export function councilToFiles(
   session: Session, opts: ExportOptions = {},
@@ -191,7 +199,7 @@ export function councilToFiles(
     // has to know which ones were cut off rather than finished.
     if (e.truncated) lines.push('- ⚠ stopped at its output limit, not because it had finished');
     lines.push('');
-    if (prompt) {
+    if (prompt && opts.prompt !== false) {
       lines.push('## Prompt');
       lines.push('');
       lines.push(prompt);

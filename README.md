@@ -41,7 +41,10 @@ stripping and the frontend is vanilla HTML/JS/CSS - nothing to compile, nothing 
 
 What carries across all four: **personas** are written once and layered onto any seat, models
 are **discovered from the endpoint** rather than typed, any session **forks** from any message,
-and every transcript **exports** as markdown.
+and every transcript **exports** as markdown - or opens in a **print view**: the whole session as
+one document in your theme, to print or save as PDF, with the prompt, the reasoning or any single
+answer left out. It prints without the browser's header and footer, so the server's address stays
+off the page (in Firefox, while the print dialog's Margins setting is Default).
 
 ## The four modes in detail
 

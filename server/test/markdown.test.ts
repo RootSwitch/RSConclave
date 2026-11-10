@@ -75,6 +75,17 @@ test('markdown: ordered and unordered lists', () => {
   assert.equal(b[1].ordered, true);
 });
 
+test('markdown: task list items carry their tick, and lose the brackets', () => {
+  const [b] = parseMarkdown('- [ ] verify backups\n- [x] snapshot taken\n- [X] shouting is fine\n- plain item\n- [link-ish] text');
+  assert.deepEqual(b.checks, [false, true, true, null, null]);
+  assert.equal(b.items[0][0].s, 'verify backups');
+  assert.equal(b.items[1][0].s, 'snapshot taken');
+  // Only "[ ]", "[x]" and "[X]" are ticks; other brackets are the item's own text.
+  assert.equal(b.items[4][0].s, '[link-ish] text');
+  // Ordered checklists are a thing models write too.
+  assert.deepEqual(parseMarkdown('1. [x] done\n2. [ ] not yet')[0].checks, [true, false]);
+});
+
 test('markdown: latex symbol tokens become symbols', () => {
   assert.equal(mdReplaceLatex('Analog $\\rightarrow$ IP'), 'Analog → IP');
   assert.equal(mdReplaceLatex('a \\times b \\approx c'), 'a × b ≈ c');

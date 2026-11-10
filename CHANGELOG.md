@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+**A print view, for printing a session or saving it as PDF.** Markdown reads
+well in the app or Obsidian and badly in Notepad, and printing the app gave one
+page: the transcript lives in a scroller inside a full-height layout, so the
+printer only saw what fitted the window. Print view - beside the export buttons
+in every mode - lays the session out as one document in the current theme,
+with the prompt and the reasoning switchable and any single answer untickable.
+It prints edge to edge in the theme's colours instead of white paper, and
+without the browser's header and footer: the page sets no margin, which leaves
+Chrome and Firefox no room to draw the title, the page's address and the date
+(Firefox's own source draws them only when the margin is taller than a line;
+it honours this while its print dialog's Margins setting is Default), and a
+spacer repeated on every page gives the margin back in the page's colour.
+Ctrl+P on a session now prints the whole document the same way. Checked in
+headless Chrome against a four-member council: four pages, no address, the
+unticked member gone, and a light theme printing as light.
+
+**A prompt box beside reasoning on the council's exports.** Untick it and the
+markdown export, the per-answer zip and the print view leave out what was
+asked - the same paragraphs that otherwise open every file of a review.
+
+**Checklists render as checklists.** A list item opening with "[ ]" or "[x]"
+now shows a tick box instead of the brackets, in the app and in print. Models
+write a lot of checklists, and as literal brackets they read as noise.
+
 **The context meter counts the reply as it streams.** It used to measure only
 the prompt, filled in once before the first token, so a model reasoning at
 length towards the end of its window showed 40% while the real total went past

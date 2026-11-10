@@ -31,6 +31,7 @@ const Chat = {
       el('div', { class: 'row', style: 'margin-bottom: 8px' },
         el('span', { class: 'badge' }, session.config.model),
         el('a', { href: `/api/sessions/${session.id}/export.md`, download: '' }, el('button', {}, 'Export markdown')),
+        printViewButton(session),
         el('a', { href: `/api/sessions/${session.id}`, target: '_blank' }, el('button', {}, 'View JSON')),
         cloneButton(session),
         !App.isActiveSession() ? resumeButton(session.id) : null,

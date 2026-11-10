@@ -202,3 +202,23 @@ test('export: per-answer files carry the prompt and disambiguate a repeated mode
   // Every file stands alone: an answer without its question cannot be checked.
   for (const f of files) assert.match(f.text, /## Prompt\n\nthe question/);
 });
+
+test('export: prompt: false leaves out what was asked, and only that', () => {
+  const s = councilSession([
+    entry({ kind: 'user', speaker: 'You', text: 'the question' }),
+    entry({ speaker: 'alpha:7b', model: 'alpha:7b', text: '<think>mulling</think>the answer' }),
+    entry({ kind: 'user', speaker: 'You', text: 'a follow-up' }),
+    entry({ speaker: 'alpha:7b', model: 'alpha:7b', text: 'second answer' }),
+  ]);
+  const md = sessionToMarkdown(s, [], { prompt: false });
+  assert.ok(!/the question|a follow-up/.test(md), 'no user turn survives');
+  assert.match(md, /the answer/);
+  assert.match(md, /second answer/);
+  assert.match(md, /mulling/, 'reasoning is a separate choice');
+  for (const f of councilToFiles(s, { prompt: false })) {
+    assert.ok(!/## Prompt/.test(f.text), f.text);
+    assert.match(f.text, /## Answer/);
+  }
+  // Left unsaid, the prompt stays - as it always has.
+  assert.match(sessionToMarkdown(s), /the question/);
+});

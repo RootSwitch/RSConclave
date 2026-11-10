@@ -28,6 +28,7 @@ const Pipeline = {
           renameButton(session.id, () => App.session.title, (t) => { App.session.title = t; titleEl.textContent = t; }),
           el('span', { class: 'grow' }),
           el('a', { href: `/api/sessions/${session.id}/export.md`, download: '' }, el('button', {}, 'Export markdown')),
+          printViewButton(session),
           el('a', { href: `/api/sessions/${session.id}`, target: '_blank' }, el('button', {}, 'View JSON')),
           cloneButton(session),
         ),
