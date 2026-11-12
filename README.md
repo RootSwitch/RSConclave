@@ -686,10 +686,12 @@ exercise all four modes.
   default keep_alive applies. Worth turning on when a model only just fits, since a
   still-resident previous speaker can make the next model's load fail its memory estimate.
 - Mid-stream stalls abort after 120s of silence. A slow first token (the model loading on the
-  remote box) is expected and shown as "loading model", and gets its own 10-minute budget - the
-  120s idle timer only starts once bytes are actually arriving. The generous cap exists because
-  the box runs one generation at a time, so an endpoint that never answers would otherwise hold
-  that slot until someone pressed Cancel.
+  remote box, then reading the prompt) is expected and shown as "loading model", and gets its
+  own 60-minute budget, counted from sending the request - the 120s idle timer only starts once
+  bytes are actually arriving. Reading the prompt is most of that wait on a model that spills
+  into system RAM: at 45-170 tokens a second, a 66K-token document takes 7 to 25 minutes before
+  the first token. The cap exists because the box runs one generation at a time, so an endpoint
+  that never answers would otherwise hold that slot until someone pressed Cancel.
 
 ## License
 

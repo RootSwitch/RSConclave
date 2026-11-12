@@ -1,14 +1,30 @@
 // Inference clients: model discovery + streaming chat for Ollama and
 // OpenAI-compatible (llama.cpp server) endpoints. Zero dependencies.
 import type { ChatMessage, Endpoint, GenParams, Reasoning, StreamResult } from './types.ts';
+import { errorText, longRequest } from './longrequest.ts';
 
 const IDLE_TIMEOUT_MS = 120_000; // abort if no bytes arrive for this long mid-stream
 /*
  * Budget for the first byte, which covers loading the model and processing the
  * prompt on the remote box. Generous rather than absent: the run slot is a
  * shared resource, so a box that never answers must not hold it forever.
+ *
+ * ONE budget, from sending the request to the first byte of the reply, however
+ * the server splits that wait. Ollama holds its headers until the first token,
+ * so the whole wait happens inside doPost; llama.cpp sends headers at once and
+ * the wait happens inside the first read. Timing the two separately gave
+ * llama.cpp the full budget and Ollama none of it (see longrequest.ts).
+ *
+ * An hour, because prompt reading is what this covers and it is slow on models
+ * that spill into system RAM: 45 to 170 tokens a second measured on large MoEs
+ * behind a 24 GB card, so a 66K-token document takes 7 to 25 minutes before the first
+ * token, and a full 128K window nearly an hour on the slowest. Ten minutes
+ * fitted neither. Cancel still ends the wait at any point.
  */
-const FIRST_BYTE_TIMEOUT_MS = 10 * 60 * 1000;
+const FIRST_BYTE_TIMEOUT_MS = 60 * 60 * 1000;
+const noFirstToken = () => new Error(
+  `no first token after ${FIRST_BYTE_TIMEOUT_MS / 60_000} minutes of loading the model and reading the prompt - giving up`,
+);
 
 export async function discoverModels(endpoint: Endpoint): Promise<string[]> {
   const base = endpoint.baseUrl.replace(/\/+$/, '');
@@ -230,6 +246,8 @@ export async function streamChat(args: StreamChatArgs): Promise<StreamResult> {
 export async function* readLines(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
+  /** What is left of FIRST_BYTE_TIMEOUT_MS after the wait for headers. */
+  firstByteBudgetMs = FIRST_BYTE_TIMEOUT_MS,
 ): AsyncGenerator<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -252,14 +270,10 @@ export async function* readLines(
        * Not unbounded, though: a wedged box would otherwise hold the only run
        * slot until someone noticed and pressed Cancel.
        */
-      const budget = gotFirstByte ? IDLE_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS;
+      const budget = gotFirstByte ? IDLE_TIMEOUT_MS : Math.max(firstByteBudgetMs, 0);
       const idle = new Promise<never>((_, reject) => {
         idleTimer = setTimeout(
-          () => reject(new Error(
-            gotFirstByte
-              ? `no data for ${IDLE_TIMEOUT_MS / 1000}s - giving up`
-              : `no first token after ${FIRST_BYTE_TIMEOUT_MS / 60000} minutes - giving up`,
-          )),
+          () => reject(gotFirstByte ? new Error(`no data for ${IDLE_TIMEOUT_MS / 1000}s - giving up`) : noFirstToken()),
           budget,
         );
       });
@@ -368,6 +382,7 @@ async function streamOllama(args: StreamChatArgs): Promise<StreamResult> {
 
   const started = Date.now();
   const res = await doPost(`${base}/api/chat`, body, args);
+  const firstByteLeft = FIRST_BYTE_TIMEOUT_MS - (Date.now() - started);
   let text = '';
   let first = true;
   let evalCount: number | undefined;
@@ -392,7 +407,7 @@ async function streamOllama(args: StreamChatArgs): Promise<StreamResult> {
   const norm = makeThinkNormalizer(push);
   let sawDone = false;
   try {
-    for await (const line of readLines(res.body!, args.signal)) {
+    for await (const line of readLines(res.body!, args.signal, firstByteLeft)) {
       if (!line.trim()) continue;
       const obj = JSON.parse(line);
       if (obj.error) throw new Error(String(obj.error));
@@ -450,6 +465,7 @@ async function streamOpenAi(args: StreamChatArgs): Promise<StreamResult> {
 
   const started = Date.now();
   const res = await doPost(`${base}/v1/chat/completions`, body, args);
+  const firstByteLeft = FIRST_BYTE_TIMEOUT_MS - (Date.now() - started);
   let text = '';
   let first = true;
   let aborted = false;
@@ -465,7 +481,7 @@ async function streamOpenAi(args: StreamChatArgs): Promise<StreamResult> {
   const norm = makeThinkNormalizer(push);
   let sawDone = false;
   try {
-    for await (const line of readLines(res.body!, args.signal)) {
+    for await (const line of readLines(res.body!, args.signal, firstByteLeft)) {
       if (!line.startsWith('data:')) continue;
       const payload = line.slice(5).trim();
       if (payload === '[DONE]') { sawDone = true; break; }
@@ -500,17 +516,28 @@ async function streamOpenAi(args: StreamChatArgs): Promise<StreamResult> {
 }
 
 async function doPost(url: string, body: unknown, args: StreamChatArgs): Promise<Response> {
+  /*
+   * longRequest, not fetch: fetch drops any request whose headers take more
+   * than five minutes, and Ollama's headers wait for the first token. The
+   * first-byte budget is enforced here instead, for the part of the wait that
+   * happens before headers; readLines gets whatever is left.
+   */
+  const firstByte = new AbortController();
+  const timer = setTimeout(() => firstByte.abort(), FIRST_BYTE_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await longRequest(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
-      signal: args.signal,
+      signal: AbortSignal.any([args.signal, firstByte.signal]),
     });
   } catch (err: any) {
     if (args.signal.aborted) throw err;
-    throw new Error(`Cannot reach ${args.endpoint.name} (${url}): ${err?.message ?? err}`);
+    if (firstByte.signal.aborted) throw noFirstToken();
+    throw new Error(`Cannot reach ${args.endpoint.name} (${url}): ${errorText(err)}`);
+  } finally {
+    clearTimeout(timer);
   }
   if (!res.ok) {
     let detail = '';

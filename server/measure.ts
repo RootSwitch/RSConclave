@@ -18,6 +18,7 @@
  */
 import type { Endpoint } from './types.ts';
 import { getModelInfo } from './providers.ts';
+import { errorText, longRequest } from './longrequest.ts';
 
 /*
  * Bytes in a stated gigabyte.
@@ -219,13 +220,24 @@ async function api(
   // Two ways to give up: the timeout, and the user pressing Cancel. Combined
   // rather than chosen between, so a cancel lands mid-load instead of waiting
   // out a fifteen-minute budget.
+  //
+  // longRequest, not fetch: a probe load answers only once the model is in
+  // memory, and fetch quietly capped this fifteen-minute budget at five (see
+  // longrequest.ts).
   const timeout = AbortSignal.timeout(timeoutMs);
-  const res = await fetch(`${base(endpoint)}${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
-  });
+  let res: Response;
+  try {
+    res = await longRequest(`${base(endpoint)}${path}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
+    });
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    if (timeout.aborted) throw new Error(`${path} gave no answer within ${Math.round(timeoutMs / 1000)}s`);
+    throw new Error(`${path} failed: ${errorText(err)}`);
+  }
   if (!res.ok) throw new Error(`${path} returned HTTP ${res.status}`);
   return res.json();
 }

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+**Long prompts on large models no longer fail at five minutes.** A council of
+models too big for the card, given a 66K-token document, failed on every seat
+with "Cannot reach (endpoint): fetch failed" while the box was answering fine. Node's
+fetch drops any request whose response headers take more than five minutes,
+and Ollama sends no headers until the first token - after the model has loaded
+and read the whole prompt, which on a model spilling into system RAM takes 7 to
+25 minutes for 66K tokens (measured on Ollama 0.40.16: headers and the first
+token arrived together). Model calls now go through node:http, which has no
+deadline of its own. The first-token budget is one budget again, counted from
+sending the request whichever way a server splits the wait - it used to start
+only once headers arrived, so Ollama never got any of it - and it is 60 minutes
+instead of 10, enough for a 66K document on the slowest large model measured.
+Context sizing's probe loads had the same hidden cap under their own 15-minute
+budget. And a failed connection now says why ("connect ECONNREFUSED ...")
+instead of "fetch failed", which hid the reason on the error's cause.
+
 **A print view, for printing a session or saving it as PDF.** Markdown reads
 well in the app or Obsidian and badly in Notepad, and printing the app gave one
 page: the transcript lives in a scroller inside a full-height layout, so the
